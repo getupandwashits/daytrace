@@ -1,0 +1,9 @@
+.build/
+build/
+.dev/
+.demo*/
+.run*/
+.swift/
+swift/.build/
+swift/.dev/
+.DS_Store

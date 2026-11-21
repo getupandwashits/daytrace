@@ -1,0 +1,7 @@
+[app]
+name = "DayTrace"
+id = "io.github.getupandwashits.daytrace"
+version = "0.1.0"
+executable = "daytrace"
+package = "./cmd/daytrace"
+icon = "Resources/icon.png"

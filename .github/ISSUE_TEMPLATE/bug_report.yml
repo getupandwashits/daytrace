@@ -1,0 +1,53 @@
+name: Bug report
+description: 报告一个可复现的问题
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请确认你用的是最新代码，并且问题不是由辅助功能授权失效引起的。
+        请不要粘贴真实的工作内容、窗口标题、密码或 API Key。
+  - type: input
+    id: version
+    attributes:
+      label: DayTrace 版本
+      description: 提交号或版本号；也可以附 `daytrace-agent doctor` 的输出
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本
+      placeholder: "例如 macOS 15.1"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为 / 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或截图
+      description: 截图请遮住窗口标题和正文；日志里如果出现密钥请先删掉。
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已确认内容里没有真实的密码、密钥或他人的工作记录
+          required: true

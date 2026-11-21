@@ -120,8 +120,6 @@ type StatusSnapshot struct {
 	RestTargetSeconds     float64   `json:"restTargetSeconds"`
 	RemainingFraction     float64   `json:"remainingFraction"`
 	TrackingSuspended     bool      `json:"trackingSuspended"`
-	CompletedPomodoros    int       `json:"completedPomodoros"`
-	PomodorosPerCycle     int       `json:"pomodorosPerCycle"`
 }
 
 // MarshalJSON matches the Swift encoder's .iso8601 strategy: UTC, second
@@ -142,8 +140,6 @@ func (s StatusSnapshot) MarshalJSON() ([]byte, error) {
 		RestTargetSeconds     float64 `json:"restTargetSeconds"`
 		RemainingFraction     float64 `json:"remainingFraction"`
 		TrackingSuspended     bool    `json:"trackingSuspended"`
-		CompletedPomodoros    int     `json:"completedPomodoros"`
-		PomodorosPerCycle     int     `json:"pomodorosPerCycle"`
 	}
 	return json.Marshal(wire{
 		SchemaVersion:         s.SchemaVersion,
@@ -160,35 +156,17 @@ func (s StatusSnapshot) MarshalJSON() ([]byte, error) {
 		RestTargetSeconds:     s.RestTargetSeconds,
 		RemainingFraction:     s.RemainingFraction,
 		TrackingSuspended:     s.TrackingSuspended,
-		CompletedPomodoros:    s.CompletedPomodoros,
-		PomodorosPerCycle:     s.PomodorosPerCycle,
 	})
 }
 
-type LegacyLiveStatus struct {
-	SchemaVersion         int       `json:"schemaVersion"`
-	Source                string    `json:"source"`
-	ProcessID             int       `json:"processID"`
-	UpdatedAt             time.Time `json:"updatedAt"`
-	State                 string    `json:"state"`
-	StateLabel            string    `json:"stateLabel"`
-	FocusElapsedSeconds   float64   `json:"focusElapsedSeconds"`
-	FocusTargetSeconds    float64   `json:"focusTargetSeconds"`
-	FocusRemainingSeconds float64   `json:"focusRemainingSeconds"`
-	RestRemainingSeconds  float64   `json:"restRemainingSeconds"`
-	RestTargetSeconds     float64   `json:"restTargetSeconds"`
-	RemainingFraction     float64   `json:"remainingFraction"`
-	TrackingSuspended     bool      `json:"trackingSuspended"`
-	Mode                  string    `json:"mode"`
-	Phase                 string    `json:"phase"`
-	CompletedPomodoros    int       `json:"completedPomodoros"`
-	PomodorosPerCycle     int       `json:"pomodorosPerCycle"`
-}
-
 type ExportState struct {
-	LastExportAt   time.Time `json:"lastExportAt,omitzero"`
-	LastExportEnd  time.Time `json:"lastExportEnd,omitzero"`
-	LastExportFile string    `json:"lastExportFile,omitempty"`
+	Version        int                  `json:"version,omitempty"`
+	LastExportAt   time.Time            `json:"lastExportAt,omitzero"`
+	LastExportEnd  time.Time            `json:"lastExportEnd,omitzero"`
+	LastExportFile string               `json:"lastExportFile,omitempty"`
+	Journal        map[string]logCursor `json:"journal,omitempty"`
+	Sessions       logCursor            `json:"sessions,omitzero"`
+	Pending        *pendingExport       `json:"pending,omitempty"`
 }
 
 type AppDuration struct {
@@ -215,4 +193,5 @@ type ExportResult struct {
 	Written     []string `json:"written,omitempty"`
 	SampleCount int      `json:"sampleCount"`
 	Message     string   `json:"message"`
+	Err         error    `json:"-"`
 }

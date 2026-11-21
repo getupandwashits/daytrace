@@ -5,172 +5,106 @@
 [![CI](https://github.com/getupandwashits/daytrace/actions/workflows/ci.yml/badge.svg)](https://github.com/getupandwashits/daytrace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-DayTrace 是一个 macOS 菜单栏应用，把**自动专注计时**和**前台活动记录**合在一起：它在本机记录你实际做了什么——前台应用、窗口、屏幕上的文字、专注时段——每天整理成四层 Markdown，让 AI 或你自己能由粗到细地回看一天。
+DayTrace 是一个独立的 macOS 菜单栏应用，把自动专注计时和可选的前台活动采集整理成便于回看的本地 Markdown 归档。
 
-*DayTrace is a local-first macOS menu-bar app: it records the foreground app, window, on-screen text and focus sessions, then writes a layered daily Markdown archive. No screenshots, no keyboard hooks, no network.*
+*DayTrace is a standalone macOS menu bar app for automatic focus timing and optional foreground activity recording. It writes local Markdown archives and does not capture screenshots, record keystrokes or send data over the network.*
 
-- **活动采集**：每 10 秒（切换应用时立即）读一次前台窗口的 Accessibility 文字，只在本机落盘；不截屏、不挂钩键盘、不联网。
-- **自动专注**：按系统闲置时间判断专注、短暂停顿、离开，自动开始/暂停计时；回来时要连续用键鼠（10 秒内至少两次输入）才恢复，单次误触不会启动新的一轮；到 25 分钟弹窗，连按两下空格或点「开始休息」进入带倒计时的休息。
-- **每日归档**：北京时间 23:00 输出「阅读入口 + 活动摘要 + 时间线 + 全文分段」和压缩原始记录，交给本机的 AI 或总结流程。
-- 菜单栏常驻、仪表盘可查；不注册 launchd，退出应用即停止采集。
+- **自动专注**：根据系统闲置时间切换专注、短暂停顿和休息。休息后持续使用键鼠会开始新一轮，到达目标时间会弹出休息卡片。锁屏和睡眠期间挂起计时。
+- **活动采集**：开启后每 10 秒采样，检测到切换前台应用时补采。授予辅助功能权限后可读取窗口标题和应用提供的 Accessibility 文本。可在设置里排除应用。
+- **归档**：默认北京时间 23:00 归档尚未提交的采样和已结束的专注时段。支持随时手动归档。
+- **菜单栏常驻**：在菜单栏打开仪表盘查看概览、专注历史和设置。退出应用即停止采集。
 
-## 快速开始
+## 安装
 
-需要 macOS 12 或更新、Go 1.26+，以及 Xcode Command Line Tools（Viva 通过 cgo 调用 Cocoa/Metal）。
+当前版本从源码构建。需要 macOS 12 或更新、Go 1.26 或更新，以及 Xcode Command Line Tools。构建脚本使用 Go 1.26.11，以生成面向 macOS 12 的产物。首次构建可由 Go 自动下载这个工具链。
 
 ```bash
 git clone https://github.com/getupandwashits/daytrace.git
 cd daytrace
 ./scripts/build.sh --install
+open /Applications/DayTrace.app
 ```
 
-`build.sh` 会先跑 `go test`、`go vet` 和 `go tool viva vet`，再用 Viva 打包 `build/DayTrace.app` 并安装到 `/Applications`。也可以不带 `--install`，只构建到 `build/`。
+也可以只运行 `./scripts/build.sh`，产物位于 `build/DayTrace.app`，架构与构建机器一致。安装前请退出正在运行的 DayTrace。构建产物使用 ad-hoc 签名，适合本机使用。重新构建后，可能需要在系统设置里移除旧的辅助功能条目并重新授权。
 
-首次启动后：
+## 首次使用
 
-1. 菜单栏出现倒计时（专注剩余时间 / 休息倒计时）。
-2. 打开「系统设置 → 隐私与安全性 → 辅助功能」，勾选 DayTrace；没有这一步只能记录应用名和窗口标题，读不到界面文字。
-3. 从菜单栏菜单打开仪表盘，在「设置」里确认输出目录（默认 `~/Documents/DayTrace`）。
+1. 从菜单栏打开仪表盘。专注计时可直接使用。
+2. 如需记录前台应用，在「设置 → 活动采集」开启开关并保存。该开关是新安装用户的采集入口。
+3. 如需窗口标题和正文，点击「请求辅助功能权限」，在「系统设置 → 隐私与安全性 → 辅助功能」授权 DayTrace。在权限启用前，采集只包含应用名等状态信息。
+4. 在设置里确认输出目录。需要立刻生成归档时，从菜单栏或仪表盘选择「立即归档」。
 
-应用是菜单栏附件（`LSUIElement`），不会出现在 Dock；点菜单栏菜单里的「打开仪表盘」查看概览、历史和设置。
+部分应用（例如 Zed）通过 Accessibility 提供的正文不完整。采到的内容和用时属于观测记录，用时根据采样估算。
 
-> 目前只提供源码构建。`.app` 使用 ad-hoc 签名，没有经过 Apple 公证；把构建出的应用拷到别的机器时，Gatekeeper 可能要求右键打开。
+## 归档和数据
 
-## 技术选型
+| 内容 | 默认位置 |
+| --- | --- |
+| 设置和状态 | `~/Library/Application Support/DayTrace/` |
+| 活动日志 | `journal/events/YYYY-MM-DD.jsonl` |
+| 专注日志 | `sessions/sessions.jsonl` |
+| 输出目录 | `archives/`，可在设置里指定其他路径 |
 
-- **Go 1.26+**，[Viva](https://github.com/vivaui/viva) `v0.6.5`（Go-first、Cocoa/Metal、无 WebView）。
-- macOS 上 Viva 通过 cgo 调用 Cocoa/Metal，需要 Xcode Command Line Tools。
-- Accessibility / CoreGraphics 用少量 cgo 直接调用，不需要 Swift helper 或独立采集进程。
-- 存储保持普通文件：活动 JSONL、专注 JSONL、设置 JSON；不引入数据库。
+定时归档目录按计划截止时间命名，例如 `2026-11-21_23-00/`。手动目录带 `_manual`，同分钟的后续归档会加序号。每个目录包含：
 
-## 目录
+- `index.md` 提供概况、专注时段、应用用时和原文索引。
+- `ui/digest.md` 提供按小时整理的活动摘要。
+- `ui/timeline.md` 提供各个观察时段。
+- `ui/part-NNN.md` 保存去重的原文。
+- `activity.jsonl.gz` 和 `meta.json` 保存活动采样和归档元数据。
 
-```text
-daytrace/
-├── cmd/
-│   ├── daytrace/          # 菜单栏应用（Viva）
-│   └── daytrace-agent/    # 调试 / 运维 CLI
-├── internal/
-│   ├── core/              # 路径、设置、存储、专注引擎、摘要、归档、兼容状态文件
-│   ├── macos/             # cgo：AX 采集、空闲、锁屏、原生菜单栏项、休息卡片
-│   └── ui/                # Viva 页面与菜单
-├── Resources/icon.png     # 应用图标（打包时转成 .icns）
-├── scripts/build.sh       # 构建 .app
-├── swift/                 # Swift 原型（行为与输出格式的参考实现）
-└── README.md
-```
+跨天启动时，下一次定时归档会补交截止时间前仍在本地的未归档记录。已全部成功归档且超过 7 天的活动日志可以被清理。使用 `export --force` 会另存一份当天仍可读取的活动和专注快照，不改变自动补档的进度。
 
-## 开发
+日志末尾若因写入中断而不完整，DayTrace 会恢复完整记录，并把损坏片段保存为日志旁的 `.damaged-*` 文件供排查。输出目录不可用时，可以在设置里换一个目录再归档。新目录从上一次确认交付的位置继续，旧目录里可能留有一次未登记完成的归档。
+
+从较早的 DayTrace 开发构建升级时，设置和本地日志可继续使用。第一次归档会重新检查手边的日志，部分旧记录可能再归档一次。旧格式归档可独立阅读，新归档使用上面的目录结构。
+
+## 隐私
+
+- 辅助功能权限允许读取当前前台窗口的标题和应用暴露的界面内容，其中可能包括未显示在当前视口的内容。
+- DayTrace 跳过标为安全输入的控件，以及内置名单里和能由窗口标题或网址识别的部分密码管理器、浏览器私密窗口。需要保密的应用请加入排除列表，或暂时关闭采集。
+- 采集时清理识别出的 HTTP(S) URL 的用户信息、查询参数和片段。摘要额外遮蔽可识别的密钥和密码。活动日志、时间线、原文分段和压缩数据仍可能包含敏感内容，分享前请检查。自选的云同步目录会按相应工具的设置同步。
+- 清除 DayTrace 本地数据时，先退出应用，再删除 `~/Library/Application Support/DayTrace`。如果曾选过外部输出目录，请在各目录中单独删除 DayTrace 生成的归档。
+
+## 开发与 CLI
 
 ```bash
-cd daytrace
-
-go mod tidy            # 首次拉依赖
-go test ./...          # 无窗口测试（含 Viva Driver 的 UI 测试）
+go test ./...
 go vet ./...
 go tool viva vet
-go tool viva dev .     # 热重载运行
-./scripts/build.sh     # 构建 build/DayTrace.app（ad-hoc 签名）
-./scripts/build.sh --install   # 构建并安装到 /Applications
+go tool viva dev .
+./scripts/build.sh
 ```
 
-调试时用环境变量把数据完全隔离，不碰正式数据：
+用隔离目录启动应用：
 
 ```bash
 DAYTRACE_HOME="$PWD/.dev/home" \
 DAYTRACE_OUTPUT="$PWD/.dev/output" \
-DAYTRACE_LEGACY_STATUS_DIR="$PWD/.dev/legacy/AutoPomodoro" \
+DAYTRACE_SHOW_DASHBOARD=1 \
 ./build/DayTrace.app/Contents/MacOS/daytrace
-
-# 想让它启动就显示仪表盘（默认只驻留菜单栏）
-DAYTRACE_SHOW_DASHBOARD=1
 ```
 
-### CLI
-
-`daytrace-agent` 和 GUI 读写同一份数据，用同样的 `DAYTRACE_*` 环境变量指定位置：
+`./scripts/build.sh` 同时构建 `.build/daytrace-agent`。这些命令与 GUI 使用相同的数据目录。给调试命令指定 `DAYTRACE_HOME` 和 `DAYTRACE_OUTPUT` 可隔离日志和归档。设置页保存操作不会覆盖 `DAYTRACE_OUTPUT`。
 
 ```bash
-go build -o .build/daytrace-agent ./cmd/daytrace-agent
-
-./.build/daytrace-agent doctor              # 路径、权限、兼容状态文件归属
-./.build/daytrace-agent status              # 读 status.json
-./.build/daytrace-agent sample              # 立即采集一条前台窗口并打印
-./.build/daytrace-agent collect             # 前台采集，Ctrl-C 结束
-./.build/daytrace-agent export --force      # 立即归档
-./.build/daytrace-agent export --due        # 只有到点才归档
-./.build/daytrace-agent analyze 2026-11-19  # 打印当天分析
-./.build/daytrace-agent demo                # 合成数据跑一遍完整归档（需要隔离目录）
+./.build/daytrace-agent doctor             # 检查路径、权限和最近归档
+./.build/daytrace-agent status             # 查看专注状态
+./.build/daytrace-agent sample             # 采集一条样本、写入活动日志并打印
+./.build/daytrace-agent collect            # 持续采集，Ctrl-C 退出
+./.build/daytrace-agent export             # 归档当前未交付的记录
+./.build/daytrace-agent export --force     # 另存当天快照
+./.build/daytrace-agent export --due       # 检查定时归档
+./.build/daytrace-agent analyze YYYY-MM-DD # 查看当天活动计数
+./.build/daytrace-agent demo               # 用合成数据跑完整归档
 ```
 
-`demo` 会拒绝在正式数据目录上运行，必须同时设置 `DAYTRACE_HOME` 和 `DAYTRACE_OUTPUT`。
+`demo` 需要同时指定 `DAYTRACE_HOME` 和 `DAYTRACE_OUTPUT`，请设为临时目录。
 
-## 数据位置
+## 源码和许可
 
-| 内容 | 路径 |
-| --- | --- |
-| 设置 | `~/Library/Application Support/DayTrace/settings.json` |
-| 活动采样 | `~/Library/Application Support/DayTrace/journal/events/YYYY-MM-DD.jsonl` |
-| 专注记录 | `~/Library/Application Support/DayTrace/sessions/sessions.jsonl` |
-| 运行状态 | `~/Library/Application Support/DayTrace/status.json` |
-| 归档状态 | `~/Library/Application Support/DayTrace/export-state.json` |
-| Daily_record 输出 | 默认 `~/Documents/DayTrace`，可在设置里改 |
+Go 版由 `cmd/daytrace`、`internal/core`、`internal/macos` 和 `internal/ui` 组成，使用 [Viva](https://github.com/vivaui/viva) 和 macOS 系统框架。[`swift/`](swift/README.md) 保存历史原型。
 
-删除 `~/Library/Application Support/DayTrace` 即可清空全部本机数据。
+专注计时的行为参考了 [AutoPomodoro](https://github.com/MaTwickenham/AutoPomodoro)，活动记录来自作者此前的 MyMonitor 实践。归档的分层设计也参考了 [Beayy v0.2.19](https://github.com/hengfengliya/beayy/tree/v0.2.19)。
 
-## 兼容旧版（可选）
-
-DayTrace 来自作者之前自用的两个应用，保留了它们的外部读取契约；只有在你还在用那些读取方时才需要关心：
-
-1. **AutoPomodoro 状态文件**：`~/Library/Application Support/AutoPomodoro/status.json` 和沙盒容器里的同名文件，`source` 为 `autopomodoro`，字段、秒级 ISO8601 时间与旧版一致。旧 AutoPomodoro 进程在运行时（或 5 秒内有别的存活进程写过）退让不写，退出后接管。
-2. **Daily_record 归档**：定时文件名 `YYYY-MM-DD_23-00`，手动文件带 `_manual`；四层输出 `.md`、`.ui/digest.md`、`.ui/timeline.md`、`.ui/part-NNN.md`；原始数据 `.raw/<name>.jsonl.gz`；`.meta.json` 含 `cutoff`、`first_timestamp`、`last_timestamp`、`records`、`ui_format_version` 等键。归档时间晚于 23:00 时仍按 23:00 作为 cutoff，保证补跑不串档。
-3. 不修改旧版本的数据、launchd 任务或已有记录。
-
-兼容性联调可以用任何按 `.meta.json` 和四层文件读取记录的脚本（`load_groups`、`read_entry`、`build_batches` 是一套典型用法）。
-
-## 安全与隐私
-
-- 只读取当前前台窗口的 Accessibility 文本；不截屏、不挂钩键盘、不联网。
-- 跳过密码框（secure text field）、密码管理器和系统私密界面；URL 去掉 query 和 fragment。
-- 捕获到的界面文字按数据处理，不当作指令。
-- 归档里的疑似密钥/密码在摘要层替换为 `〔已遮蔽〕`，原始文本只留在本机 `.raw/*.jsonl.gz`。
-
-## 权限
-
-读取窗口文字需要「系统设置 → 隐私与安全性 → 辅助功能」授权。ad-hoc 签名的 `.app` 每次重新构建后签名会变，需要重新勾选 DayTrace（或先 `-` 移除旧条目再添加）。菜单栏菜单和专注计时不需要任何权限。
-
-## 已知限制
-
-- 采集进程随应用运行，不常驻；应用退出期间没有记录，归档里会体现为采样空档。
-- 系统睡眠没有单独的 `sleeping` 状态，只体现为采样空档。
-- 归档只覆盖当天；跨天补跑需要手动 `export --force`。
-- 已完整交付的缓存日期在归档后清理，最近 7 天保留（供跨归档的「沿用」文字引用）。
-- 少数应用不通过 Accessibility 暴露正文（例如 Zed 的编辑器），这类窗口只能记录应用名、窗口标题和路径。
-- 系统睡眠、合盖或屏幕锁定期间不会开始新的专注会话。
-
-## 致谢与参考
-
-DayTrace 是一个独立的 Go 实现。专注计时和活动记录的行为、格式参考了下面两个第三方项目，没有复制它们的代码：
-
-- [**AutoPomodoro**](https://github.com/MaTwickenham/AutoPomodoro)：按系统闲置时间判断专注/停顿/离开的菜单栏番茄钟。DayTrace 按同样的状态机语义重写了专注计时，并继续写与它兼容的状态文件。该项目目前没有声明开源许可证，因此只参考行为，没有复制代码。
-- [**Beayy**](https://github.com/hengfengliya/beayy/tree/v0.2.19)（v0.2.19，MIT）：采集思路和「先摘要、再按需回看原始记录」的分层结构——10 分钟摘要 → 小时摘要 → 日总结，原始事件留在本机。DayTrace 把这种分层落成了每天四个 Markdown 文件，交给 AI 由粗到细地读。只借鉴设计，没有复制代码。
-
-如果之后引用或移植了上述项目的代码，请分别遵守它们的许可证（Beayy 为 MIT，AutoPomodoro 未声明许可）。
-
-### 关于前一版
-
-DayTrace 的前一版是作者自用的 MyMonitor（Python + Swift 实现），前后是同一个项目，本仓库是它的 Go 重写，旧版不再单独维护。
-
-如果机器上还留着它的 `~/Library/Application Support/MyMonitor/settings.json`，DayTrace 首次启动会沿用里面的 `output_dir`（只读）；没有就用 `~/Documents/DayTrace`。旧的数据目录、设置文件和已有 Daily_record 保持原样，不迁移、不删除，停掉旧的自动启动任务即可。
-
-## 贡献
-
-见 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 的方式私下报告。
-
-## 依赖与许可
-
-DayTrace 以 MIT 许可证发布，全文见 [LICENSE](LICENSE)。
-
-运行时依赖 [Viva](https://github.com/vivaui/viva)（Apache-2.0）和 macOS 系统框架（AppKit / Metal / Accessibility / CoreGraphics）。Viva 及其声明的第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)；分发 `.app` 时请一并附上这两个文件。
-
-Swift 原型的功能和兼容说明见 [`swift/README.md`](swift/README.md)。
+DayTrace 使用 [MIT 许可证](LICENSE)。第三方组件和构建产物附带的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)，隐私与安全问题按 [SECURITY.md](SECURITY.md) 报告。

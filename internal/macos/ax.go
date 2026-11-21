@@ -25,7 +25,6 @@ char *dtAXURLCopyString(CFTypeRef value);
 void dtAXRelease(CFTypeRef value);
 int dtAXIsNull(CFTypeRef value);
 void dtFrontmost(char **bundle, char **name, pid_t *pid);
-int dtAppRunning(const char *bundleID, const char *name);
 void dtActivate(void);
 */
 import "C"
@@ -54,16 +53,6 @@ func IdleSeconds() float64 {
 }
 
 func ScreenLocked() bool { return C.dtScreenLocked() != 0 }
-
-// AppRunning reports whether an application with this bundle identifier or
-// localized name is currently running.
-func AppRunning(bundleID, name string) bool {
-	cbundle := C.CString(bundleID)
-	cname := C.CString(name)
-	defer C.free(unsafe.Pointer(cbundle))
-	defer C.free(unsafe.Pointer(cname))
-	return C.dtAppRunning(cbundle, cname) != 0
-}
 
 type FrontmostApp struct {
 	BundleID string
@@ -286,5 +275,7 @@ func pageAddress(raw string) string {
 	parsed.User = nil
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	parsed.ForceQuery = false
 	return parsed.String()
 }

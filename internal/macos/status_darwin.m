@@ -13,6 +13,7 @@ typedef struct {
     char *title;
     int disabled;
     int separator;
+    int actionable;
 } dt_status_entry;
 
 @interface DayTraceStatusMenu : NSObject <NSMenuDelegate>
@@ -37,7 +38,9 @@ static void dtStatusApplyRows(NSMenu *menu, NSArray *rows) {
                                                       action:@selector(selected:)
                                                keyEquivalent:@""];
         item.target = dtStatusMenuHost;
-        item.tag = [row[@"index"] integerValue];
+        if ([row[@"actionable"] boolValue]) {
+            item.representedObject = row[@"title"];
+        }
         item.enabled = ![row[@"disabled"] boolValue];
         [menu addItem:item];
         [item release];
@@ -47,7 +50,10 @@ static void dtStatusApplyRows(NSMenu *menu, NSArray *rows) {
 @implementation DayTraceStatusMenu
 
 - (void)selected:(NSMenuItem *)sender {
-    daytraceStatusAction((int)sender.tag);
+    NSString *title = sender.representedObject;
+    if (title != nil) {
+        daytraceStatusAction((char *)title.UTF8String);
+    }
 }
 
 - (void)menuWillOpen:(NSMenu *)menu {
@@ -87,37 +93,41 @@ void dtStatusItemInstall(void) {
 }
 
 void dtStatusItemSetTitle(const char *title) {
-    NSString *text = title != NULL ? [NSString stringWithUTF8String:title] : @"";
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [dtStatusTitle release];
-        dtStatusTitle = [text copy];
-        if (dtStatusItem != nil) {
-            dtStatusItem.button.title = dtStatusTitle;
-        }
-    });
+    @autoreleasepool {
+        NSString *text = title != NULL ? [NSString stringWithUTF8String:title] : @"";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [dtStatusTitle release];
+            dtStatusTitle = [text copy];
+            if (dtStatusItem != nil) {
+                dtStatusItem.button.title = dtStatusTitle;
+            }
+        });
+    }
 }
 
 void dtStatusItemSetMenu(dt_status_entry *entries, int count) {
-    NSMutableArray *rows = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
-    for (int index = 0; index < count; index++) {
-        dt_status_entry entry = entries[index];
-        NSString *title = entry.title != NULL ? [NSString stringWithUTF8String:entry.title] : @"";
-        [rows addObject:@{
-            @"title": title,
-            @"disabled": @(entry.disabled != 0),
-            @"separator": @(entry.separator != 0),
-            @"index": @(index),
-        }];
+    @autoreleasepool {
+        NSMutableArray *rows = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+        for (int index = 0; index < count; index++) {
+            dt_status_entry entry = entries[index];
+            NSString *title = entry.title != NULL ? [NSString stringWithUTF8String:entry.title] : @"";
+            [rows addObject:@{
+                @"title": title,
+                @"disabled": @(entry.disabled != 0),
+                @"separator": @(entry.separator != 0),
+                @"actionable": @(entry.actionable != 0),
+            }];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (dtStatusMenu == nil) {
+                return;
+            }
+            if (dtStatusMenuOpen) {
+                [dtStatusPendingRows release];
+                dtStatusPendingRows = [rows copy];
+                return;
+            }
+            dtStatusApplyRows(dtStatusMenu, rows);
+        });
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (dtStatusMenu == nil) {
-            return;
-        }
-        if (dtStatusMenuOpen) {
-            [dtStatusPendingRows release];
-            dtStatusPendingRows = [rows copy];
-            return;
-        }
-        dtStatusApplyRows(dtStatusMenu, rows);
-    });
 }

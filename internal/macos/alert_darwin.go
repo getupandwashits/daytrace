@@ -6,6 +6,7 @@ package macos
 #cgo LDFLAGS: -framework AppKit
 #include <stdlib.h>
 
+void dtDismissRestPrompt(void);
 void dtShowRestPrompt(const char *title, const char *message);
 */
 import "C"
@@ -33,6 +34,13 @@ func ShowRestPrompt(title, message string, answer func(bool)) {
 	defer C.free(unsafe.Pointer(ctitle))
 	defer C.free(unsafe.Pointer(cmessage))
 	C.dtShowRestPrompt(ctitle, cmessage)
+}
+
+func DismissRestPrompt() {
+	restPrompt.mu.Lock()
+	restPrompt.answer = nil
+	restPrompt.mu.Unlock()
+	C.dtDismissRestPrompt()
 }
 
 func answerRestPrompt(rest bool) {

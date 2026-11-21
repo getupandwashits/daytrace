@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"math"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -23,7 +25,6 @@ type App struct {
 	Focus     *core.FocusEngine
 	Collector *core.Collector
 	Exporter  *core.Exporter
-	Legacy    *core.LegacyStatusWriter
 
 	Invalidator *vivaapp.Invalidator
 
@@ -34,7 +35,7 @@ type App struct {
 	lastSample       *core.ActivitySample
 	lastExport       string
 	lastExportAt     time.Time
-	lastError        string
+	errors           map[string]string
 	accessibility    bool
 	collectorRunning bool
 	refreshedAt      time.Time
@@ -69,18 +70,26 @@ func NewApp() *App {
 		Focus:       focus,
 		Collector:   collector,
 		Exporter:    exporter,
-		Legacy:      core.NewLegacyStatusWriter(),
+		errors:      make(map[string]string),
 		Invalidator: &vivaapp.Invalidator{},
 		tab:         "概览",
 		form:        formFromSettings(settings.Get()),
 	}
 	focus.OnSession = func(session core.FocusSession) {
 		if err := sessions.Append(session); err != nil {
-			app.setError("写入专注记录失败：" + err.Error())
+			app.reportError("写入专注记录失败", err.Error())
+		} else {
+			app.reportError("写入专注记录失败", "")
 		}
 	}
 	focus.OnReminder = func(message string) {
 		app.askRest(message)
+	}
+	collector.OnError = func(message string) { app.reportError("活动采集", message) }
+	collector.OnSample = func(core.ActivitySample) { app.reportError("活动采集", "") }
+	state := exporter.LoadState()
+	if state.LastExportFile != "" {
+		app.lastExport, app.lastExportAt = "最近归档 "+state.LastExportFile, state.LastExportAt
 	}
 	return app
 }
@@ -124,11 +133,29 @@ func (a *App) Quit() {
 func (a *App) SetTab(tab string) { a.tab = tab }
 
 func (a *App) OpenOutput() {
-	output := a.Settings.Get().OutputDirectory
-	if output == "" {
-		return
+	go func() {
+		path, err := core.ArchiveDirectory(a.Settings.Get())
+		if err == nil {
+			err = os.MkdirAll(path, 0o700)
+		}
+		if err == nil {
+			err = exec.Command("/usr/bin/open", path).Run()
+		}
+		a.reportError("打开输出目录失败", errorText(err))
+		a.Invalidator.Invalidate()
+	}()
+}
+
+func (a *App) SetPresence(reason string, suspended bool) {
+	if suspended {
+		a.Focus.Suspend(reason)
+		macos.DismissRestPrompt()
+	} else {
+		a.Focus.Resume(reason)
 	}
-	_ = exec.Command("/usr/bin/open", output).Start()
+	if a.stop != nil {
+		a.afterFocusAction()
+	}
 }
 
 func (a *App) loop() {
@@ -157,8 +184,8 @@ func (a *App) loop() {
 }
 
 func (a *App) persistStatus() {
-	_ = a.Focus.Snapshot().WriteTo(core.StatusPath())
-	_ = a.Legacy.Write(a.Focus.LegacySnapshot())
+	err := a.Focus.Snapshot().WriteTo(core.StatusPath())
+	a.reportError("写入状态失败", errorText(err))
 }
 
 // updateStatusItem keeps the menu bar text and menu in step with the engine.
@@ -169,27 +196,22 @@ func (a *App) updateStatusItem() {
 }
 
 func (a *App) exportIfDue(now time.Time) {
-	if !a.Settings.Get().AutoExport {
-		return
+	if a.Exporter.IsDue(now) {
+		a.startExport(func() core.ExportResult { return a.Exporter.ExportDue(now) }, false)
 	}
-	result := a.Exporter.ExportDue(now)
-	if result.EntryURL == "" {
-		return
-	}
-	a.setExport(result.Message)
-	a.refresh()
 }
 
 func (a *App) refresh() {
 	now := time.Now()
 	summary := core.ActivitySummary{}
-	if samples, err := a.Journal.SamplesOn(now); err == nil {
+	samples, err := a.Journal.SamplesOn(now)
+	if err == nil {
 		summary = core.Analyze(samples).Summary
-	} else {
-		a.setError("读取采集记录失败：" + err.Error())
 	}
-	todaySessions, _ := a.Sessions.SessionsOn(now)
-	allSessions, _ := a.Sessions.LoadAll()
+	a.reportError("读取采集记录失败", errorText(err))
+	allSessions, err := a.Sessions.LoadAll()
+	a.reportError("读取专注记录失败", errorText(err))
+	todaySessions := core.SessionsOn(allSessions, now)
 	lastSample := a.Collector.LastSample()
 
 	a.mu.Lock()
@@ -204,6 +226,10 @@ func (a *App) refresh() {
 }
 
 func (a *App) ExportNow() {
+	a.startExport(func() core.ExportResult { return a.Exporter.ExportNow(time.Now(), false) }, true)
+}
+
+func (a *App) startExport(export func() core.ExportResult, manual bool) {
 	a.exportMu.Lock()
 	if a.exporting {
 		a.exportMu.Unlock()
@@ -219,13 +245,12 @@ func (a *App) ExportNow() {
 			a.exportMu.Unlock()
 			a.Invalidator.Invalidate()
 		}()
-		result := a.Exporter.ExportNow(time.Now(), false)
-		if result.EntryURL != "" {
+		result := export()
+		a.reportError("归档失败", errorText(result.Err))
+		if result.EntryURL != "" || (manual && result.Err == nil) {
 			a.setExport(result.Message)
-		} else {
-			a.setExport(result.Message)
+			a.refresh()
 		}
-		a.refresh()
 	}()
 }
 
@@ -247,34 +272,43 @@ func (a *App) SaveSettings() {
 	next.ExcludedApps = splitList(a.form.excluded)
 
 	if err := a.Settings.Save(next); err != nil {
-		a.setError("保存设置失败：" + err.Error())
+		a.reportError("保存设置失败", err.Error())
 		return
 	}
+	a.reportError("保存设置失败", "")
+	next = a.Settings.Get()
 	a.Focus.Configure(next)
-	a.Collector.Update(core.CollectorConfigFromSettings(next))
-	if next.CollectActivity && !a.Collector.Running() {
-		a.Collector.Start()
-	} else if !next.CollectActivity && a.Collector.Running() {
-		a.Collector.Stop()
+	a.Collector.Configure(core.CollectorConfigFromSettings(next), next.CollectActivity)
+	if !next.CollectActivity {
+		a.reportError("活动采集", "")
 	}
 	a.form = formFromSettings(next)
-	a.setExport("设置已保存")
 	a.persistStatus()
 	a.refresh()
 	a.Invalidator.Invalidate()
 }
 
-func (a *App) setError(message string) {
+func (a *App) reportError(operation, message string) {
 	a.mu.Lock()
-	a.lastError = message
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+	if message == "" {
+		delete(a.errors, operation)
+	} else {
+		a.errors[operation] = message
+	}
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (a *App) setExport(message string) {
 	a.mu.Lock()
 	a.lastExport = message
 	a.lastExportAt = time.Now()
-	a.lastError = ""
 	a.mu.Unlock()
 }
 
@@ -284,7 +318,13 @@ func (a *App) setExport(message string) {
 func (a *App) askRest(message string) {
 	rest := a.Settings.Get().RestMin
 	detail := fmt.Sprintf("%s 休息 %g 分钟，连按两下空格或点「开始休息」。", message, rest)
+	if a.Focus.Snapshot().State != string(core.StateReminding) {
+		return
+	}
 	macos.ShowRestPrompt("该休息一下了", detail, func(rest bool) {
+		if a.Focus.Snapshot().State != string(core.StateReminding) {
+			return
+		}
 		if rest {
 			a.Focus.BeginRest()
 		} else {
@@ -296,7 +336,7 @@ func (a *App) askRest(message string) {
 
 func parseFloat(value string, fallback float64) float64 {
 	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	if err != nil {
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 		return fallback
 	}
 	return parsed

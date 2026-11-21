@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
@@ -42,39 +41,18 @@ func StatusPath() string {
 	return filepath.Join(Home(), "status.json")
 }
 
-// DefaultOutput picks where daily records go: an explicit DAYTRACE_OUTPUT
-// wins, then the output_dir the previous version left in its settings (only
-// present for people upgrading from it), then a plain per-user default.
-func DefaultOutput() string {
-	if value := os.Getenv("DAYTRACE_OUTPUT"); value != "" {
-		return value
-	}
-	if value := legacyMonitorOutput(); value != "" {
-		return value
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Documents", "DayTrace")
-}
+func DefaultOutput() string { return filepath.Join(Home(), "archives") }
 
-func legacyMonitorOutput() string {
-	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, "Library", "Application Support", "MyMonitor", "settings.json")
-	data, err := os.ReadFile(path)
+func ArchiveDirectory(settings Settings) (string, error) {
+	path := settings.OutputDirectory
+	if path == "" {
+		path = DefaultOutput()
+	}
+	expanded, err := expandHome(path)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	var object map[string]any
-	if err := json.Unmarshal(data, &object); err != nil {
-		return ""
-	}
-	value, _ := object["output_dir"].(string)
-	if value == "" {
-		return ""
-	}
-	if expanded, err := expandHome(value); err == nil {
-		return expanded
-	}
-	return ""
+	return filepath.Abs(expanded)
 }
 
 func expandHome(value string) (string, error) {
@@ -86,20 +64,6 @@ func expandHome(value string) (string, error) {
 		return filepath.Join(home, value[2:]), nil
 	}
 	return value, nil
-}
-
-// LegacyStatusPaths returns the files AutoPomodoro's readers look at. The
-// sandbox container comes first, matching scripts/read-status.py.
-func LegacyStatusPaths() []string {
-	if dir := os.Getenv("DAYTRACE_LEGACY_STATUS_DIR"); dir != "" {
-		return []string{filepath.Join(dir, "status.json")}
-	}
-	home, _ := os.UserHomeDir()
-	return []string{
-		filepath.Join(home, "Library", "Containers", "twickenhamma.AutoPomodoro",
-			"Data", "Library", "Application Support", "AutoPomodoro", "status.json"),
-		filepath.Join(home, "Library", "Application Support", "AutoPomodoro", "status.json"),
-	}
 }
 
 func DayString(t time.Time) string {

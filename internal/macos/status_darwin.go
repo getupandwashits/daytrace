@@ -10,6 +10,7 @@ typedef struct {
 	char *title;
 	int disabled;
 	int separator;
+	int actionable;
 } dt_status_entry;
 
 void dtStatusItemInstall(void);
@@ -34,7 +35,7 @@ type MenuEntry struct {
 
 var statusMenu struct {
 	mu      sync.Mutex
-	actions []func()
+	actions map[string]func()
 }
 
 // InstallStatusItem creates the text status item. It must be called on the
@@ -51,10 +52,18 @@ func SetStatusTitle(title string) {
 // SetStatusMenu replaces the status item's menu. Entries without OnSelect and
 // without Disabled are shown as plain text rows.
 func SetStatusMenu(entries []MenuEntry) {
-	actions := make([]func(), len(entries))
-	for index, entry := range entries {
-		actions[index] = entry.OnSelect
+	statusMenu.mu.Lock()
+	if statusMenu.actions == nil {
+		statusMenu.actions = map[string]func(){}
 	}
+	for _, entry := range entries {
+		if entry.OnSelect != nil {
+			// Action titles are fixed, unique labels. Keep callbacks for rows
+			// that AppKit may still be showing in an open menu.
+			statusMenu.actions[entry.Title] = entry.OnSelect
+		}
+	}
+	statusMenu.mu.Unlock()
 
 	var array *C.dt_status_entry
 	if len(entries) > 0 {
@@ -71,6 +80,9 @@ func SetStatusMenu(entries []MenuEntry) {
 			if entry.Separator {
 				rows[index].separator = 1
 			}
+			if entry.OnSelect != nil && !entry.Disabled {
+				rows[index].actionable = 1
+			}
 		}
 		defer func() {
 			for _, row := range unsafe.Slice(array, len(entries)) {
@@ -80,20 +92,12 @@ func SetStatusMenu(entries []MenuEntry) {
 		}()
 	}
 
-	statusMenu.mu.Lock()
-	statusMenu.actions = actions
-	statusMenu.mu.Unlock()
-
 	C.dtStatusItemSetMenu(array, C.int(len(entries)))
 }
 
-// daytraceStatusAction is called from the AppKit menu with the row index.
-func runStatusAction(index int) {
+func runStatusAction(title string) {
 	statusMenu.mu.Lock()
-	var action func()
-	if index >= 0 && index < len(statusMenu.actions) {
-		action = statusMenu.actions[index]
-	}
+	action := statusMenu.actions[title]
 	statusMenu.mu.Unlock()
 	if action != nil {
 		action()

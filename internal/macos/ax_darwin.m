@@ -33,10 +33,11 @@ double dtIdleSeconds(void) {
 int dtScreenLocked(void) {
     CFDictionaryRef session = CGSessionCopyCurrentDictionary();
     if (session == NULL) {
-        return 0;
+        return 1;
     }
-    CFBooleanRef locked = CFDictionaryGetValue(session, CFSTR("CGSSessionScreenIsLocked"));
-    int value = (locked != NULL && CFBooleanGetValue(locked)) ? 1 : 0;
+    CFTypeRef locked = CFDictionaryGetValue(session, CFSTR("CGSSessionScreenIsLocked"));
+    int value = locked != NULL && CFGetTypeID(locked) == CFBooleanGetTypeID() &&
+                CFBooleanGetValue((CFBooleanRef)locked);
     CFRelease(session);
     return value;
 }
@@ -174,22 +175,6 @@ void dtFrontmost(char **bundle, char **name, pid_t *pid) {
     dispatch_sync(dispatch_get_main_queue(), ^{
         dtFillFrontmost(bundle, name, pid);
     });
-}
-
-int dtAppRunning(const char *bundleID, const char *name) {
-    @autoreleasepool {
-        NSString *wantedBundle = bundleID != NULL ? [NSString stringWithUTF8String:bundleID] : nil;
-        NSString *wantedName = name != NULL ? [NSString stringWithUTF8String:name] : nil;
-        for (NSRunningApplication *app in [NSWorkspace sharedWorkspace].runningApplications) {
-            if (wantedBundle != nil && [app.bundleIdentifier isEqualToString:wantedBundle]) {
-                return 1;
-            }
-            if (wantedName != nil && [app.localizedName isEqualToString:wantedName]) {
-                return 1;
-            }
-        }
-    }
-    return 0;
 }
 
 // dtActivate brings the accessory (menu bar) app forward so a window opened

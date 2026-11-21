@@ -18,7 +18,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>io.github.getupandwashits.daytrace</string>
+    <string>io.github.getupandwashits.daytrace.prototype</string>
     <key>CFBundleName</key>
     <string>DayTrace</string>
     <key>CFBundleDisplayName</key>

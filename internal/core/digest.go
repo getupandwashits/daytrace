@@ -170,9 +170,9 @@ func BuildDigest(added []AddedLine, blockSeconds map[BlockKey]float64, notice st
 	out.WriteString("按「小时｜应用｜窗口」分块。已去掉同一窗口里后来被补全的流式草稿、只差数字或空白的变体、")
 	out.WriteString("纯装饰线、重复窗口标题的行、状态刷新文字和密码管理器文字；")
 	out.WriteString("每块按活跃用时分配字数，超出时优先保留正文，省略处标注段号。")
-	out.WriteString("除 API Key 形状的字符串和密码字段值（显示为")
+	out.WriteString("摘要会移除网址的查询参数和片段，并遮蔽能识别的密钥和密码（显示为")
 	out.WriteString(DigestMask)
-	out.WriteString("）外，没有改写文字。\n\n")
+	out.WriteString("）。分享前仍请检查内容。\n\n")
 
 	excerpt := 0
 	truncatedBlocks := 0
@@ -206,9 +206,13 @@ func BuildDigest(added []AddedLine, blockSeconds map[BlockKey]float64, notice st
 			block := blocks[key]
 			seconds := secondsByBlock[key]
 			ranges := PartRanges(block.Parts)
-			name := key.App
+			name, hits := maskLine(sanitizeURLs(key.App))
+			masked += hits
+			name = markdownText(name)
 			if key.Title != "" {
-				name += "｜" + firstRunes(key.Title, 60)
+				title, hits := maskLine(sanitizeURLs(key.Title))
+				masked += hits
+				name += "｜" + markdownText(firstRunes(title, 60))
 			}
 			if seconds < 60 {
 				minor = append(minor, fmt.Sprintf("%s（%s，段 %s）", name, FormatDuration(seconds), ranges))
@@ -250,7 +254,7 @@ func BuildDigest(added []AddedLine, blockSeconds map[BlockKey]float64, notice st
 						body = append(body, omissionMarker(omittedRun))
 						omittedRun = nil
 					}
-					maskedLine, count := maskLine(line.Text)
+					maskedLine, count := maskLine(sanitizeURLs(line.Text))
 					masked += count
 					body = append(body, maskedLine)
 				} else {

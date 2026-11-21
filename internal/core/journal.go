@@ -2,215 +2,397 @@ package core
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
 
-type Journal struct {
-	mu   sync.Mutex
-	root string
-}
+type Journal struct{ root string }
 
-func NewJournal(root string) *Journal {
-	return &Journal{root: root}
-}
-
-func (j *Journal) Root() string { return j.root }
+func NewJournal(root string) *Journal { return &Journal{root: root} }
+func (j *Journal) Root() string       { return j.root }
 
 func (j *Journal) Append(sample ActivitySample) error {
 	if err := os.MkdirAll(j.root, 0o700); err != nil {
 		return err
 	}
-	path := filepath.Join(j.root, DayString(sample.Timestamp)+".jsonl")
-	data, err := json.Marshal(sample)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-	if _, err := file.Write(data); err != nil {
-		return err
-	}
-	return file.Sync()
+	return withFileLock(filepath.Join(j.root, ".journal.lock"), func() error {
+		return appendRecord(filepath.Join(j.root, DayString(sample.Timestamp)+".jsonl"), sample, sampleTime)
+	})
 }
 
 func (j *Journal) Files() ([]string, error) {
 	entries, err := os.ReadDir(j.root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	var files []string
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
-			continue
+		name := entry.Name()
+		if entry.Type().IsRegular() && strings.HasSuffix(name, ".jsonl") {
+			if _, err := time.Parse(time.DateOnly, dayOfLog(name)); err == nil {
+				files = append(files, filepath.Join(j.root, name))
+			}
 		}
-		files = append(files, filepath.Join(j.root, entry.Name()))
 	}
-	sort.Strings(files)
 	return files, nil
 }
 
-func (j *Journal) ReadRange(since, until *time.Time) ([]ActivitySample, error) {
-	files, err := j.Files()
-	if err != nil {
-		return nil, err
-	}
-	var samples []ActivitySample
-	for _, path := range files {
-		file, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(file)
-		scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-		for scanner.Scan() {
-			var sample ActivitySample
-			if json.Unmarshal(scanner.Bytes(), &sample) != nil {
-				continue
-			}
-			if since != nil && sample.Timestamp.Before(*since) {
-				continue
-			}
-			if until != nil && sample.Timestamp.After(*until) {
-				continue
-			}
-			samples = append(samples, sample)
-		}
-		scanErr := scanner.Err()
-		_ = file.Close()
-		if scanErr != nil {
-			return nil, scanErr
-		}
-	}
-	sort.Slice(samples, func(a, b int) bool { return samples[a].Timestamp.Before(samples[b].Timestamp) })
-	return samples, nil
+func dayOfLog(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), ".jsonl")
 }
 
 func (j *Journal) SamplesOn(day time.Time) ([]ActivitySample, error) {
-	start := StartOfDay(day)
-	end := start.AddDate(0, 0, 1).Add(-time.Millisecond)
-	return j.ReadRange(&start, &end)
+	path := filepath.Join(j.root, DayString(day)+".jsonl")
+	samples, _, err := readLog[ActivitySample](path, logCursor{}, time.Time{}, sampleTime)
+	sort.SliceStable(samples, func(a, b int) bool { return samples[a].Timestamp.Before(samples[b].Timestamp) })
+	return samples, err
 }
 
-func (j *Journal) Pending(since *time.Time, until time.Time) ([]ActivitySample, error) {
-	samples, err := j.ReadRange(since, &until)
+func sampleTime(sample ActivitySample) time.Time { return sample.Timestamp }
+
+func (j *Journal) pending(delivered map[string]logCursor, cutoff time.Time) ([]ActivitySample, map[string]logCursor, error) {
+	files, err := j.Files()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if since == nil {
-		return samples, nil
+	next := make(map[string]logCursor, len(files))
+	var samples []ActivitySample
+	for _, path := range files {
+		day := dayOfLog(path)
+		if day > DayString(cutoff) {
+			if cursor := delivered[day]; cursor.Offset > 0 {
+				next[day] = cursor
+			}
+			continue
+		}
+		records, cursor, err := readLog[ActivitySample](path, delivered[day], cutoff, sampleTime)
+		if err != nil {
+			return nil, nil, err
+		}
+		if cursor.Offset > 0 {
+			next[day] = cursor
+		}
+		samples = append(samples, records...)
 	}
-	kept := samples[:0]
-	for _, sample := range samples {
-		if sample.Timestamp.After(*since) {
-			kept = append(kept, sample)
+	return samples, next, nil
+}
+
+func (j *Journal) pruneDelivered(delivered map[string]logCursor, now time.Time) error {
+	expireBefore := DayString(now.In(Beijing).AddDate(0, 0, -7))
+	for day, cursor := range delivered {
+		if day >= expireBefore {
+			continue
+		}
+		if _, err := time.Parse(time.DateOnly, day); err != nil {
+			continue
+		}
+		err := withFileLock(filepath.Join(j.root, ".journal.lock"), func() error {
+			path := filepath.Join(j.root, day+".jsonl")
+			file, err := os.Open(path)
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			info, err := file.Stat()
+			if err != nil || info.Size() != cursor.Offset {
+				return err
+			}
+			matches, err := cursor.matches(file)
+			if err != nil || !matches {
+				return err
+			}
+			return os.Remove(path)
+		})
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
 	}
-	return kept, nil
+	return nil
 }
 
-type SessionStore struct {
-	mu   sync.Mutex
-	root string
-}
+type SessionStore struct{ root string }
 
-func NewSessionStore(root string) *SessionStore {
-	return &SessionStore{root: root}
-}
+func NewSessionStore(root string) *SessionStore { return &SessionStore{root: root} }
 
-func (s *SessionStore) path() string {
-	return filepath.Join(s.root, "sessions.jsonl")
-}
+func (s *SessionStore) path() string { return filepath.Join(s.root, "sessions.jsonl") }
 
 func (s *SessionStore) Append(session FocusSession) error {
 	if err := os.MkdirAll(s.root, 0o700); err != nil {
 		return err
 	}
-	data, err := json.Marshal(session)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	file, err := os.OpenFile(s.path(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-	if _, err := file.Write(data); err != nil {
-		return err
-	}
-	return file.Sync()
+	return appendRecord(s.path(), session, sessionEnd)
+}
+
+func sessionEnd(session FocusSession) time.Time { return session.End }
+
+func (s *SessionStore) pending(delivered logCursor, cutoff time.Time) ([]FocusSession, logCursor, error) {
+	return readLog[FocusSession](s.path(), delivered, cutoff, sessionEnd)
 }
 
 func (s *SessionStore) LoadAll() ([]FocusSession, error) {
-	file, err := os.Open(s.path())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer file.Close()
-	var sessions []FocusSession
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		var session FocusSession
-		if json.Unmarshal(scanner.Bytes(), &session) == nil {
-			sessions = append(sessions, session)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	sort.Slice(sessions, func(a, b int) bool { return sessions[a].Start.Before(sessions[b].Start) })
-	return sessions, nil
+	sessions, _, err := s.pending(logCursor{}, time.Time{})
+	sort.SliceStable(sessions, func(a, b int) bool { return sessions[a].Start.Before(sessions[b].Start) })
+	return sessions, err
 }
 
-func (s *SessionStore) SessionsOn(day time.Time) ([]FocusSession, error) {
+func SessionsOn(sessions []FocusSession, day time.Time) []FocusSession {
 	start := StartOfDay(day)
 	end := start.AddDate(0, 0, 1)
-	sessions, err := s.LoadAll()
-	if err != nil {
-		return nil, err
-	}
 	var kept []FocusSession
 	for _, session := range sessions {
 		if session.Start.Before(end) && session.End.After(start) {
 			kept = append(kept, session)
 		}
 	}
-	return kept, nil
+	return kept
 }
 
-func SanitizeFilename(value string) string {
-	replacer := strings.NewReplacer("/", "-", ":", "-", "\x00", "")
-	return replacer.Replace(value)
+func (s *SessionStore) SessionsOn(day time.Time) ([]FocusSession, error) {
+	sessions, err := s.LoadAll()
+	return SessionsOn(sessions, day), err
+}
+
+func appendRecord[T any](path string, value T, stamp func(T) time.Time) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	size, repair, err := logTail(file)
+	if err != nil {
+		return err
+	}
+	if repair {
+		size, err = repairLogTail(file, size, stamp)
+		if err != nil {
+			return err
+		}
+	}
+	if _, err = file.WriteAt(append(data, '\n'), size); err == nil {
+		err = file.Sync()
+	}
+	if err == nil && size == 0 {
+		err = syncDirectory(filepath.Dir(path))
+	}
+	if err != nil {
+		return errors.Join(err, file.Truncate(size), file.Sync())
+	}
+	return nil
+}
+
+// logTail reports whether a nonempty log is missing its final line break.
+func logTail(file *os.File) (size int64, repair bool, err error) {
+	info, err := file.Stat()
+	if err != nil || info.Size() == 0 {
+		return 0, false, err
+	}
+	size = info.Size()
+	var last [1]byte
+	_, err = file.ReadAt(last[:], size-1)
+	return size, last[0] != '\n', err
+}
+
+// repairLogTail runs with an exclusive file lock. A full record only needs
+// its delimiter restored. A damaged fragment is backed up and synced before
+// truncation, so an interruption cannot lose the bytes.
+func repairLogTail[T any](file *os.File, size int64, stamp func(T) time.Time) (int64, error) {
+	var block [4096]byte
+	start := size
+	for start > 0 {
+		begin := max(0, start-int64(len(block)))
+		chunk := block[:start-begin]
+		if _, err := file.ReadAt(chunk, begin); err != nil {
+			return 0, err
+		}
+		start = begin
+		if newline := bytes.LastIndexByte(chunk, '\n'); newline >= 0 {
+			start += int64(newline + 1)
+			break
+		}
+	}
+	tail, err := io.ReadAll(io.NewSectionReader(file, start, size-start))
+	if err != nil {
+		return 0, err
+	}
+	if _, err := decodeLogRecord(tail, stamp); err == nil {
+		if _, err := file.WriteAt([]byte{'\n'}, size); err != nil {
+			return 0, err
+		}
+		return size + 1, file.Sync()
+	}
+
+	digest := sha256.Sum256(tail)
+	backup := fmt.Sprintf("%s.damaged-%d-%x", file.Name(), start, digest)
+	if err := writeFileAtomic(backup, tail); err != nil {
+		return 0, err
+	}
+	if err := syncDirectory(filepath.Dir(backup)); err != nil {
+		return 0, err
+	}
+	if err := file.Truncate(start); err != nil {
+		return 0, err
+	}
+	return start, file.Sync()
+}
+
+func decodeLogRecord[T any](line []byte, stamp func(T) time.Time) (T, error) {
+	var record T
+	if err := json.Unmarshal(line, &record); err != nil {
+		return record, err
+	}
+	if stamp(record).IsZero() {
+		return record, errors.New("缺少时间戳")
+	}
+	return record, nil
+}
+
+// Readers normally open the log read-only. If its last line was interrupted,
+// release the shared lock before reopening for repair and check the tail
+// again under the exclusive lock in case a writer already repaired it.
+func openReadLog[T any](path string, stamp func(T) time.Time) (*os.File, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_SH); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	_, repair, err := logTail(file)
+	if err == nil && !repair {
+		return file, nil
+	}
+	_ = file.Close()
+	if err != nil {
+		return nil, err
+	}
+	file, err = os.OpenFile(path, os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX)
+	if err == nil {
+		var size int64
+		size, repair, err = logTail(file)
+		if err == nil && repair {
+			_, err = repairLogTail(file, size, stamp)
+		}
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("恢复日志 %s: %w", filepath.Base(path), err)
+	}
+	return file, nil
+}
+
+type logCursor struct {
+	Offset    int64  `json:"offset"`
+	LineBytes int64  `json:"lineBytes"`
+	Anchor    string `json:"anchor"`
+}
+
+func (c logCursor) matches(file *os.File) (bool, error) {
+	if c.Offset <= 0 || c.LineBytes <= 0 || c.LineBytes > c.Offset {
+		return false, nil
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.NewSectionReader(file, c.Offset-c.LineBytes, c.LineBytes))
+	if err != nil {
+		return false, err
+	}
+	return n == c.LineBytes && hex.EncodeToString(hash.Sum(nil)) == c.Anchor, nil
+}
+
+// Each cursor covers a contiguous prefix of the append-only log. A record
+// appended during an export remains beyond that prefix regardless of its timestamp.
+func readLog[T any](path string, cursor logCursor, cutoff time.Time, stamp func(T) time.Time) ([]T, logCursor, error) {
+	file, err := openReadLog(path, stamp)
+	if file == nil {
+		return nil, logCursor{}, err
+	}
+	defer file.Close()
+	if cursor.Offset != 0 {
+		matches, err := cursor.matches(file)
+		if err != nil {
+			return nil, logCursor{}, err
+		}
+		if !matches {
+			cursor = logCursor{}
+		}
+	}
+	if _, err := file.Seek(cursor.Offset, io.SeekStart); err != nil {
+		return nil, logCursor{}, err
+	}
+	reader := bufio.NewReaderSize(file, 64*1024)
+	var records []T
+	var lastLine []byte
+	done := func() ([]T, logCursor, error) {
+		if lastLine != nil {
+			cursor.LineBytes = int64(len(lastLine))
+			sum := sha256.Sum256(lastLine)
+			cursor.Anchor = hex.EncodeToString(sum[:])
+		}
+		return records, cursor, nil
+	}
+	for {
+		line, err := reader.ReadBytes('\n')
+		if errors.Is(err, io.EOF) && len(line) == 0 {
+			return done()
+		}
+		if err != nil {
+			return nil, logCursor{}, fmt.Errorf("%s:%d: %w", filepath.Base(path), cursor.Offset, err)
+		}
+		record, err := decodeLogRecord(line, stamp)
+		if err != nil {
+			return nil, logCursor{}, fmt.Errorf("%s:%d: %w", filepath.Base(path), cursor.Offset, err)
+		}
+		if !cutoff.IsZero() && stamp(record).After(cutoff) {
+			return done()
+		}
+		cursor.Offset += int64(len(line))
+		lastLine = line
+		records = append(records, record)
+	}
+}
+
+func withFileLock(path string, action func() error) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	return action()
 }

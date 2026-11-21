@@ -24,8 +24,6 @@ struct AgentMain {
             sample()
         case "settings":
             showSettings()
-        case "legacy":
-            legacy()
         default:
             printHelp()
         }
@@ -42,7 +40,6 @@ struct AgentMain {
         due                 执行一次到点检查
         sample              采集一次当前前台窗口并打印
         settings            打印当前设置 JSON
-        legacy              检查 AutoPomodoro 兼容状态文件的路径与占用情况
         """)
     }
 
@@ -77,22 +74,6 @@ struct AgentMain {
         if let data = try? DayTraceJSON.prettyEncoder.encode(settings),
            let text = String(data: data, encoding: .utf8) {
             print(text)
-        }
-    }
-
-    static func legacy() {
-        let writer = LegacyStatusWriter()
-        print("ownedByAnotherInstance: \(writer.ownedByAnotherInstance)")
-        for url in writer.urls {
-            print("path: \(url.path)")
-            guard let data = try? Data(contentsOf: url),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                print("  missing")
-                continue
-            }
-            print("  source: \(object["source"] ?? "-")")
-            print("  state: \(object["state"] ?? "-") phase: \(object["phase"] ?? "-")")
-            print("  updatedAt: \(object["updatedAt"] ?? "-") pid: \(object["processID"] ?? "-")")
         }
     }
 

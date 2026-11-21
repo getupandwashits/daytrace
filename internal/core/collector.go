@@ -5,6 +5,7 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -64,10 +65,21 @@ func (c *Collector) AccessibilityGranted() bool { return macos.AXTrusted() }
 
 func (c *Collector) RequestAccessibility() { macos.RequestAccessibility() }
 
-func (c *Collector) Update(config CollectorConfig) {
+// Configure invalidates in-flight samples and rebuilds the timer when its
+// settings change. It never waits for Accessibility or the AppKit thread.
+func (c *Collector) Configure(config CollectorConfig, enabled bool) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.running == enabled && c.config.SampleInterval == config.SampleInterval &&
+		c.config.IdleThreshold == config.IdleThreshold && c.config.UIMaxChars == config.UIMaxChars &&
+		slices.Equal(c.config.ExcludedApps, config.ExcludedApps) {
+		return
+	}
+	c.stopLocked()
 	c.config = config
-	c.mu.Unlock()
+	if enabled {
+		c.startLocked()
+	}
 }
 
 func (c *Collector) Running() bool {
@@ -88,8 +100,12 @@ func (c *Collector) LastSample() *ActivitySample {
 
 func (c *Collector) Start() {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.startLocked()
+}
+
+func (c *Collector) startLocked() {
 	if c.running {
-		c.mu.Unlock()
 		return
 	}
 	c.running = true
@@ -98,7 +114,6 @@ func (c *Collector) Start() {
 	interval := max(2.0, c.config.SampleInterval)
 	stop := make(chan struct{})
 	c.stop = stop
-	c.mu.Unlock()
 
 	go func() {
 		c.sample(generation)
@@ -145,18 +160,18 @@ func (c *Collector) foregroundKey() string {
 // check in sample keeps the old goroutine's results out of the journal.
 func (c *Collector) Stop() {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stopLocked()
+}
+
+func (c *Collector) stopLocked() {
 	if !c.running {
-		c.mu.Unlock()
 		return
 	}
 	c.running = false
 	c.generation++
-	stop := c.stop
+	close(c.stop)
 	c.stop = nil
-	c.mu.Unlock()
-	if stop != nil {
-		close(stop)
-	}
 }
 
 func (c *Collector) SampleNow() {
@@ -244,7 +259,12 @@ func (c *Collector) sample(generation int) {
 
 	// Discard UI if the foreground app changed during traversal.
 	after := macos.Frontmost()
-	if after.PID != app.PID {
+	if macos.ScreenLocked() {
+		sample = ActivitySample{
+			Timestamp: sample.Timestamp, State: "locked", IdleSeconds: idle,
+			SampleInterval: config.SampleInterval, IdleThreshold: config.IdleThreshold, Accessibility: trusted,
+		}
+	} else if after.PID != app.PID {
 		sample.UIText = nil
 		sample.WindowTitle = ""
 		sample.URL = ""
@@ -252,11 +272,14 @@ func (c *Collector) sample(generation int) {
 		sample.CaptureStatus = "foreground_changed"
 	}
 
-	c.deduplicate(&sample)
+	cleanSample(&sample)
 	c.emit(generation, sample)
 }
 
 func (c *Collector) isExcluded(config CollectorConfig, bundleID, name string) bool {
+	if protectedApp(bundleID, name) {
+		return true
+	}
 	for _, excluded := range config.ExcludedApps {
 		if strings.EqualFold(excluded, bundleID) || strings.EqualFold(excluded, name) {
 			return true
@@ -265,46 +288,45 @@ func (c *Collector) isExcluded(config CollectorConfig, bundleID, name string) bo
 	return false
 }
 
-func (c *Collector) deduplicate(sample *ActivitySample) {
+func (c *Collector) deduplicateLocked(sample *ActivitySample) {
 	if sample.UIText == nil || *sample.UIText == "" {
 		return
 	}
 	day := DayString(sample.Timestamp)
-	c.mu.Lock()
 	if day != c.currentDay {
 		c.currentDay = day
 		c.contexts = map[string]bool{}
 	}
 	content := sample.BundleID + "\x00" + sample.WindowTitle + "\x00" + *sample.UIText
 	sum := sha256.Sum256([]byte(content))
-	identifier := hex.EncodeToString(sum[:])
-	sample.ContextID = identifier
-	if c.contexts[identifier] {
+	sample.ContextID = hex.EncodeToString(sum[:])
+	if c.contexts[sample.ContextID] {
 		sample.UIText = nil
 		sample.UITextUnchanged = true
-	} else {
-		c.contexts[identifier] = true
 	}
-	c.mu.Unlock()
 }
 
 func (c *Collector) emit(generation int, sample ActivitySample) {
 	c.mu.Lock()
-	stale := !c.running || c.generation != generation
-	c.mu.Unlock()
-	if stale {
+	if !c.running || c.generation != generation {
+		c.mu.Unlock()
 		return
 	}
-	if err := c.journal.Append(sample); err != nil {
+	c.deduplicateLocked(&sample)
+	err := c.journal.Append(sample)
+	if err == nil {
+		if sample.ContextID != "" {
+			c.contexts[sample.ContextID] = true
+		}
+		c.lastSample = &sample
+	}
+	c.mu.Unlock()
+	if err != nil {
 		if c.OnError != nil {
 			c.OnError("写入采集记录失败：" + err.Error())
 		}
 		return
 	}
-	c.mu.Lock()
-	value := sample
-	c.lastSample = &value
-	c.mu.Unlock()
 	if c.OnSample != nil {
 		c.OnSample(sample)
 	}

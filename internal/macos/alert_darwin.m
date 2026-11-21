@@ -203,3 +203,9 @@ void dtShowRestPrompt(const char *title, const char *message) {
         dtReminderPanel = panel;
     });
 }
+
+void dtDismissRestPrompt(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        dtReminderClose();
+    });
+}

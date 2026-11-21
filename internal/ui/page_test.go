@@ -60,7 +60,6 @@ func newTestApp(t *testing.T) *App {
 	t.Helper()
 	t.Setenv("DAYTRACE_HOME", t.TempDir())
 	t.Setenv("DAYTRACE_OUTPUT", t.TempDir())
-	t.Setenv("DAYTRACE_LEGACY_STATUS_DIR", t.TempDir())
 	return NewApp()
 }
 

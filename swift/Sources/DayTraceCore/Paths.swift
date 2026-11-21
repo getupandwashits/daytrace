@@ -6,7 +6,7 @@ public enum DayTracePaths {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/DayTrace", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/DayTracePrototype", isDirectory: true)
     }
 
     public static var journal: URL { home.appendingPathComponent("journal", isDirectory: true) }
@@ -20,24 +20,7 @@ public enum DayTracePaths {
         if let override = ProcessInfo.processInfo.environment["DAYTRACE_OUTPUT"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
-        if let legacy = legacyMonitorOutput { return legacy }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/MyMonitor", isDirectory: true)
-    }
-
-    /// Reuse MyMonitor's configured output folder so the existing Daily_record
-    /// reader (and its conclusions workflow) keeps seeing new records.
-    private static var legacyMonitorOutput: URL? {
-        let settings = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/MyMonitor/settings.json")
-        guard let data = try? Data(contentsOf: settings),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = object["output_dir"] as? String,
-              !value.isEmpty
-        else { return nil }
-        let expanded = (value as NSString).expandingTildeInPath
-        guard expanded.hasPrefix("/") else { return nil }
-        return URL(fileURLWithPath: expanded, isDirectory: true)
+        return home.appendingPathComponent("archives", isDirectory: true)
     }
 
     public static let beijing: TimeZone = TimeZone(identifier: "Asia/Shanghai")!

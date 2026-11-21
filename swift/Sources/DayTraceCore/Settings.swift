@@ -21,7 +21,7 @@ public struct DayTraceSettings: Codable, Equatable {
         "org.keepassxc.keepassxc",
         "com.apple.Passwords",
     ]
-    public var collectActivity: Bool = true
+    public var collectActivity: Bool = false
 
     public var exportHour: Int = 23
     public var exportMinute: Int = 0

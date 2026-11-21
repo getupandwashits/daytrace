@@ -36,11 +36,6 @@ func (s FocusState) Label() string {
 	}
 }
 
-// PomodorosPerCycle stays in the published status files so older readers keep
-// seeing the key they know, even though DayTrace no longer runs pomodoro
-// cycles.
-const PomodorosPerCycle = 4
-
 // Returning to the desk must be sustained, not a single stray HID event (a
 // charging trackpad reconnecting, a mouse nudged on the desk). Starting or
 // resuming focus needs at least inputEventsNeeded ticks with input inside the
@@ -127,12 +122,11 @@ func (e *FocusEngine) Tick(idle *float64) {
 	} else {
 		e.idleTime = e.idleProvider()
 	}
-	e.recordInputLocked(now)
-
 	if e.suspended {
 		e.mu.Unlock()
 		return
 	}
+	e.recordInputLocked(now)
 
 	var session *FocusSession
 	var reminder string
@@ -357,6 +351,7 @@ func (e *FocusEngine) Suspend(reason string) {
 		return
 	}
 	e.suspended = true
+	e.inputEvents = nil
 	now := e.clock()
 	session := e.persistIfNeeded(TriggerManual, e.lastFocusAtLocked())
 	e.state = StateAway
@@ -463,37 +458,6 @@ func (e *FocusEngine) Snapshot() StatusSnapshot {
 		RestTargetSeconds:     e.restTarget,
 		RemainingFraction:     e.remainingFractionLocked(now),
 		TrackingSuspended:     e.suspended,
-		CompletedPomodoros:    0,
-		PomodorosPerCycle:     PomodorosPerCycle,
-	}
-}
-
-func (e *FocusEngine) LegacySnapshot() LegacyLiveStatus {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	now := e.clock()
-	phase := "focus"
-	if e.state == StateAway {
-		phase = "shortBreak"
-	}
-	return LegacyLiveStatus{
-		SchemaVersion:         1,
-		Source:                "autopomodoro",
-		ProcessID:             os.Getpid(),
-		UpdatedAt:             now,
-		State:                 string(e.state),
-		StateLabel:            e.state.Label(),
-		FocusElapsedSeconds:   e.focusDuration,
-		FocusTargetSeconds:    e.targetFocusTimeLocked(),
-		FocusRemainingSeconds: e.remainingDurationLocked(),
-		RestRemainingSeconds:  e.restRemainingLocked(now),
-		RestTargetSeconds:     e.restTarget,
-		RemainingFraction:     e.remainingFractionLocked(now),
-		TrackingSuspended:     e.suspended,
-		Mode:                  "automatic",
-		Phase:                 phase,
-		CompletedPomodoros:    0,
-		PomodorosPerCycle:     PomodorosPerCycle,
 	}
 }
 

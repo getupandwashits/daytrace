@@ -5,6 +5,6 @@ package macos
 import "C"
 
 //export daytraceStatusAction
-func daytraceStatusAction(index C.int) {
-	runStatusAction(int(index))
+func daytraceStatusAction(title *C.char) {
+	runStatusAction(C.GoString(title))
 }

@@ -1,10 +1,7 @@
 package core
 
 import (
-	"encoding/json"
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -211,100 +208,6 @@ func TestShortSessionIsNotRecorded(t *testing.T) {
 	}
 }
 
-func TestLegacyStatusMatchesAutoPomodoroSchemaAndPhase(t *testing.T) {
-	url := filepath.Join(t.TempDir(), "status.json")
-	engine, _, _ := makeEngine()
-	zero := 0.0
-	engine.Tick(&zero)
-	engine.Tick(&zero)
-
-	writer := &LegacyStatusWriter{URLs: []string{url}, Isolated: true, CheckRunningApplication: false, Clock: time.Now}
-	if err := writer.Write(engine.LegacySnapshot()); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var object map[string]any
-	if err := json.Unmarshal(data, &object); err != nil {
-		t.Fatal(err)
-	}
-	checks := map[string]any{
-		"source":        "autopomodoro",
-		"schemaVersion": float64(1),
-		"state":         "active",
-		"phase":         "focus",
-		"mode":          "automatic",
-		"processID":     float64(os.Getpid()),
-	}
-	for key, want := range checks {
-		if got := object[key]; got != want {
-			t.Errorf("%s = %v, want %v", key, got, want)
-		}
-	}
-	if updated, _ := object["updatedAt"].(string); len(updated) != 25 {
-		t.Errorf("updatedAt = %q, want second precision", updated)
-	}
-
-	engine.ResetToAway(TriggerManual)
-	if err := writer.Write(engine.LegacySnapshot()); err != nil {
-		t.Fatal(err)
-	}
-	data, _ = os.ReadFile(url)
-	_ = json.Unmarshal(data, &object)
-	if object["state"] != "away" || object["phase"] != "shortBreak" {
-		t.Fatalf("legacy after reset = %v / %v", object["state"], object["phase"])
-	}
-}
-
-func TestWriterBacksOffWhenAnotherLiveWriterOwnsTheFile(t *testing.T) {
-	url := filepath.Join(t.TempDir(), "status.json")
-	now := time.Now()
-	foreign := LegacyLiveStatus{
-		SchemaVersion: 1, Source: "autopomodoro", ProcessID: os.Getppid(), UpdatedAt: now,
-		State: "active", StateLabel: "专注中", FocusElapsedSeconds: 10,
-		FocusTargetSeconds: 1500, FocusRemainingSeconds: 1490, RestTargetSeconds: 300,
-		RemainingFraction: 0.99, Mode: "traditional", Phase: "focus",
-		CompletedPomodoros: 1, PomodorosPerCycle: 4,
-	}
-	data, err := json.Marshal(foreign)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(url, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	writer := &LegacyStatusWriter{URLs: []string{url}, Isolated: true, CheckRunningApplication: false, Clock: time.Now}
-	if !writer.OwnedByAnotherInstance() {
-		t.Fatal("foreign writer not detected")
-	}
-	if err := writer.Write(foreign); err != nil {
-		t.Fatal(err)
-	}
-	original, _ := os.ReadFile(url)
-	if string(original) != string(data) {
-		t.Fatal("foreign file was overwritten")
-	}
-
-	foreign.ProcessID = 999999
-	data, _ = json.Marshal(foreign)
-	_ = os.WriteFile(url, data, 0o600)
-	ours := foreign
-	ours.ProcessID = os.Getpid()
-	ours.State = "paused"
-	ours.StateLabel = "短暂停顿"
-	if err := writer.Write(ours); err != nil {
-		t.Fatal(err)
-	}
-	replaced, _ := os.ReadFile(url)
-	var object map[string]any
-	_ = json.Unmarshal(replaced, &object)
-	if object["processID"] != float64(os.Getpid()) || object["state"] != "paused" {
-		t.Fatalf("replacement = %v / %v", object["processID"], object["state"])
-	}
-}
-
 func TestAutomaticRestKeepsACountdown(t *testing.T) {
 	engine, _, _ := makeEngine()
 	zero := 0.0
@@ -380,5 +283,25 @@ func TestBeginRestStartsAFullCountdownAndRecordsTheFocus(t *testing.T) {
 	engine.Tick(&zero)
 	if got := engine.Snapshot().State; got != string(StateActive) {
 		t.Fatalf("state after rest ends = %s", got)
+	}
+}
+
+func TestFocusWaitsForFreshInputAfterAllSuspendReasonsClear(t *testing.T) {
+	engine, clock, _ := makeEngine()
+	engine.Suspend("lock")
+	engine.Suspend("displaySleep")
+	advance(engine, clock, 2)
+	engine.Resume("displaySleep")
+	if !engine.Snapshot().TrackingSuspended {
+		t.Fatal("display wake resumed a locked session")
+	}
+	engine.Resume("lock")
+	advance(engine, clock, 1)
+	if engine.Snapshot().State != string(StateAway) {
+		t.Fatal("input during suspension started focus")
+	}
+	advance(engine, clock, 1)
+	if engine.Snapshot().State != string(StateActive) {
+		t.Fatal("focus did not start after fresh input")
 	}
 }

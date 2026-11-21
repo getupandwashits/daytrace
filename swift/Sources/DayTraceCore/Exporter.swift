@@ -65,8 +65,7 @@ public final class Exporter {
             return ExportResult(message: "未到下一次归档时间")
         }
         // Keep the scheduled filename and cutoff at the configured time even
-        // when the check runs late (sleep, app closed). This is what the
-        // MyMonitor/Daily_record reader expects from `YYYY-MM-DD_23-00`.
+        // when the check runs late (sleep, app closed).
         let since = state.lastExportEnd ?? DayTracePaths.startOfDay(checkpoint)
         return export(cutoff: checkpoint, since: since, manual: false, now: now)
     }

@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: DayTrace 版本
-      description: 提交号或版本号；也可以附 `daytrace-agent doctor` 的输出
+      description: 填写提交号或版本号。附诊断输出时请遮住用户名和个人路径。
     validations:
       required: true
   - type: input

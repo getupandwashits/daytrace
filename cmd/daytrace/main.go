@@ -21,7 +21,6 @@ func main() {
 	runtime.LockOSThread()
 
 	daytrace := ui.NewApp()
-	daytrace.Start()
 	defer daytrace.Stop()
 
 	err := app.RunApplication(func(application *app.Application) error {
@@ -77,6 +76,8 @@ func main() {
 		// Viva's status items are icon-only, so the text item lives in the
 		// macos package; the loop feeds it the title and menu every second.
 		macos.InstallStatusItem()
+		macos.InstallPresence(daytrace.SetPresence)
+		daytrace.Start()
 		return nil
 	})
 	if err != nil {

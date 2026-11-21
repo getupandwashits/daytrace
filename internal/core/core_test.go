@@ -137,7 +137,7 @@ func TestExporterWritesFourLayerRecord(t *testing.T) {
 	}
 
 	journal := NewJournal(filepath.Join(root, "events"))
-	now := time.Now()
+	now := time.Date(2026, 11, 21, 18, 0, 0, 0, Beijing)
 	first := ActivitySample{
 		Timestamp: now.Add(-time.Second), State: "active", App: "Xcode",
 		BundleID: "com.apple.dt.Xcode", WindowTitle: "FocusEngine.swift",
@@ -173,15 +173,15 @@ func TestExporterWritesFourLayerRecord(t *testing.T) {
 		}
 	}
 
-	base := strings.TrimSuffix(filepath.Base(result.EntryURL), ".md")
-	uiDirectory := filepath.Join(filepath.Dir(result.EntryURL), base+".ui")
+	archive := filepath.Dir(result.EntryURL)
+	uiDirectory := filepath.Join(archive, "ui")
 	for _, name := range []string{"digest.md", "timeline.md", "part-001.md"} {
 		if _, err := os.Stat(filepath.Join(uiDirectory, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 
-	metaData, err := os.ReadFile(filepath.Join(filepath.Dir(result.EntryURL), base+".meta.json"))
+	metaData, err := os.ReadFile(filepath.Join(archive, "meta.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,14 +204,14 @@ func TestExporterWritesFourLayerRecord(t *testing.T) {
 		}
 	}
 
-	rawData, err := os.ReadFile(filepath.Join(filepath.Dir(result.EntryURL), ".raw", base+".jsonl.gz"))
+	rawData, err := os.ReadFile(filepath.Join(archive, "activity.jsonl.gz"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rawData) < 2 || rawData[0] != 0x1f || rawData[1] != 0x8b {
 		t.Error("raw archive is not gzip")
 	}
-	if exporter.LoadState().LastExportFile != filepath.Base(result.EntryURL) {
+	if exporter.LoadState().LastExportFile != filepath.Base(archive) {
 		t.Error("export state was not saved")
 	}
 }
@@ -254,11 +254,10 @@ func TestLateScheduledExportKeepsConfiguredFilenameAndCutoff(t *testing.T) {
 	if result.EntryURL == "" {
 		t.Fatalf("export failed: %s", result.Message)
 	}
-	if got, want := filepath.Base(result.EntryURL), DayString(day)+"_23-00.md"; got != want {
+	if got, want := filepath.Base(filepath.Dir(result.EntryURL)), DayString(day)+"_23-00"; got != want {
 		t.Fatalf("filename = %q, want %q", got, want)
 	}
-	base := strings.TrimSuffix(filepath.Base(result.EntryURL), ".md")
-	metaData, _ := os.ReadFile(filepath.Join(filepath.Dir(result.EntryURL), base+".meta.json"))
+	metaData, _ := os.ReadFile(filepath.Join(filepath.Dir(result.EntryURL), "meta.json"))
 	var meta map[string]any
 	if err := json.Unmarshal(metaData, &meta); err != nil {
 		t.Fatal(err)
@@ -323,7 +322,7 @@ func TestUnchangedTextFromEarlierArchiveIsCarriedForward(t *testing.T) {
 	}
 
 	journal := NewJournal(filepath.Join(root, "events"))
-	base := time.Now()
+	base := time.Date(2026, 11, 21, 18, 0, 0, 0, Beijing)
 	text := "session notes line one\nsession notes line two"
 	contextID := "ctx-1"
 	first := ActivitySample{
@@ -335,7 +334,7 @@ func TestUnchangedTextFromEarlierArchiveIsCarriedForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	exporter := NewExporter(journal, store, filepath.Join(root, "export-state.json"))
-	firstResult := exporter.ExportNow(base.Add(time.Second), true)
+	firstResult := exporter.ExportNow(base.Add(time.Second), false)
 	if firstResult.EntryURL == "" {
 		t.Fatalf("first export failed: %s", firstResult.Message)
 	}
@@ -352,8 +351,7 @@ func TestUnchangedTextFromEarlierArchiveIsCarriedForward(t *testing.T) {
 	if secondResult.EntryURL == "" {
 		t.Fatalf("second export failed: %s", secondResult.Message)
 	}
-	baseName := strings.TrimSuffix(filepath.Base(secondResult.EntryURL), ".md")
-	uiDir := filepath.Join(filepath.Dir(secondResult.EntryURL), baseName+".ui")
+	uiDir := filepath.Join(filepath.Dir(secondResult.EntryURL), "ui")
 
 	part, err := os.ReadFile(filepath.Join(uiDir, "part-001.md"))
 	if err != nil {
@@ -389,7 +387,7 @@ func TestExportPrunesDeliveredCacheDays(t *testing.T) {
 	}
 
 	journal := NewJournal(filepath.Join(root, "events"))
-	now := time.Now()
+	now := time.Date(2026, 11, 21, 18, 0, 0, 0, Beijing)
 	stamps := []time.Time{now.AddDate(0, 0, -10), now.AddDate(0, 0, -3), now}
 	for _, stamp := range stamps {
 		text := "cache text for " + DayString(stamp)
@@ -402,8 +400,9 @@ func TestExportPrunesDeliveredCacheDays(t *testing.T) {
 		}
 	}
 	exporter := NewExporter(journal, store, filepath.Join(root, "export-state.json"))
-	if err := exporter.SaveState(ExportState{LastExportEnd: now.AddDate(0, 0, -5)}); err != nil {
-		t.Fatal(err)
+	first := exporter.ExportNow(now.AddDate(0, 0, -5), false)
+	if first.Err != nil || first.SampleCount != 1 {
+		t.Fatalf("could not deliver first day: %+v", first)
 	}
 	result := exporter.ExportNow(now, false)
 	if result.EntryURL == "" {

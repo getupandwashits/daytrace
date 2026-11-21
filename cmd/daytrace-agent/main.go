@@ -36,8 +36,6 @@ func main() {
 		status()
 	case "settings":
 		settings()
-	case "legacy":
-		legacy()
 	case "analyze":
 		analyze(os.Args[2:])
 	case "help", "-h", "--help":
@@ -52,16 +50,15 @@ func main() {
 func usage() {
 	fmt.Print(`DayTrace agent
 
-  doctor            路径、权限、旧实例与归档状态
+  doctor            路径、权限与归档状态
   sample            立即采集一条前台样本并打印
   collect           持续采集并打印（Ctrl-C 退出）
   demo              写入隔离环境中的演示数据并归档
   export [--due|--force]
-                    立即归档（--due 走定时判断，--force 从当天开始）
+                    立即归档（--due 走定时判断，--force 另存当天快照）
   due               查看下一次定时归档与是否到期
   status            打印当前 status.json
   settings          打印当前设置
-  legacy            查看 AutoPomodoro 兼容状态的归属
   analyze [YYYY-MM-DD]
                     打印某天的活动汇总
 `)
@@ -76,17 +73,12 @@ func doctor() {
 	fmt.Println("status:     ", core.StatusPath())
 	fmt.Println("output:     ", settings.OutputDirectory)
 	fmt.Println("accessibility:", macos.AXTrusted())
-	fmt.Println("legacy paths:")
-	for _, path := range core.LegacyStatusPaths() {
-		fmt.Println("  -", path)
-	}
-	fmt.Println("legacy owned by another instance:", core.NewLegacyStatusWriter().OwnedByAnotherInstance())
 	exporter := core.NewExporter(nil, nil, "")
 	state := exporter.LoadState()
-	if state.LastExportEnd.IsZero() {
+	if state.LastExportAt.IsZero() {
 		fmt.Println("last export: (never)")
 	} else {
-		fmt.Println("last export:", state.LastExportEnd.In(core.Beijing).Format(time.RFC3339), state.LastExportFile)
+		fmt.Println("last export:", state.LastExportAt.In(core.Beijing).Format(time.RFC3339), state.LastExportFile)
 	}
 	if status, err := core.ReadStatus(core.StatusPath()); err == nil {
 		fmt.Println("status:", status.StateLabel, "focus", core.FormatDuration(status.FocusElapsedSeconds))
@@ -193,21 +185,32 @@ func demo() {
 	}
 	idle := "锁屏期间的界面没有采集。"
 	locked := core.ActivitySample{Timestamp: base.Add(20 * time.Minute), State: "locked", UIText: &idle}
-	_ = journal.Append(locked)
+	if err := journal.Append(locked); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	sessions := core.NewSessionStore(core.SessionsDir())
+	if err := sessions.Append(core.FocusSession{
+		ID: now.UTC().Format(time.RFC3339Nano), Start: base, End: base.Add(15 * time.Minute),
+		Duration: 900, Trigger: "manual",
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	exporter := core.NewExporter(journal, core.NewSettingsStore(core.SettingsPath()), core.ExportStatePath())
-	result := exporter.ExportNow(now, true)
-	fmt.Println(result.Message)
-	for _, path := range result.Written {
-		fmt.Println("  ", path)
-	}
+	printExport(exporter.ExportNow(now, false))
 }
 
 func export(args []string) {
 	flags := flag.NewFlagSet("export", flag.ExitOnError)
 	isDue := flags.Bool("due", false, "use the scheduled cutoff")
-	force := flags.Bool("force", false, "start from the beginning of today")
+	force := flags.Bool("force", false, "snapshot today without moving the scheduled export cursor")
 	_ = flags.Parse(args)
+	if (*isDue && *force) || flags.NArg() != 0 {
+		flags.Usage()
+		os.Exit(2)
+	}
 	exporter := core.NewExporter(nil, nil, "")
 	now := time.Now()
 	var result core.ExportResult
@@ -218,6 +221,14 @@ func export(args []string) {
 		result = exporter.ExportNow(now, true)
 	default:
 		result = exporter.ExportNow(now, false)
+	}
+	printExport(result)
+}
+
+func printExport(result core.ExportResult) {
+	if result.Err != nil {
+		fmt.Fprintln(os.Stderr, result.Message)
+		os.Exit(1)
 	}
 	fmt.Println(result.Message)
 	for _, path := range result.Written {
@@ -247,19 +258,6 @@ func status() {
 
 func settings() {
 	printJSON(core.NewSettingsStore(core.SettingsPath()).Get())
-}
-
-func legacy() {
-	writer := core.NewLegacyStatusWriter()
-	fmt.Println("owned by another instance:", writer.OwnedByAnotherInstance())
-	for _, path := range writer.URLs {
-		fmt.Println(path)
-		if data, err := os.ReadFile(path); err == nil {
-			fmt.Println(string(data))
-		} else {
-			fmt.Println("  (missing)")
-		}
-	}
 }
 
 func analyze(args []string) {

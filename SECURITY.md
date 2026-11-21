@@ -1,24 +1,15 @@
 # 安全政策
 
-## 报告问题
+## 私下报告
 
-如果发现可能影响用户隐私或本机安全的问题，请**不要开公开 issue**，改用 GitHub 的私密漏洞报告（仓库页面的 **Security → Advisories → Report a vulnerability**）。请说明影响范围、复现步骤和受影响的版本；不要附带真实的密码、API Key 或他人的工作内容。
+请通过 GitHub 仓库的 **Security → Advisories → Report a vulnerability** 私下报告隐私和安全问题。请提供受影响的版本、影响范围和使用合成数据的复现步骤。请勿附真实密码、令牌、工作记录或他人的数据。
 
-## 支持范围
+## 数据边界
 
-项目按最新提交维护；`0.1.x` 是当前公开版本。
+DayTrace 的活动采集由用户在设置中启用。授予辅助功能权限后，它会读取前台窗口的标题和应用暴露的界面文本。内置过滤会跳过安全输入控件、已知密码管理器和能识别的部分私密窗口。用户可排除应用或关闭采集。
 
-## 安全模型
+DayTrace 将设置、活动和专注日志保存在 `~/Library/Application Support/DayTrace/`，归档默认也在此目录，新建的日志与归档权限仅限当前用户。用户可以把归档写到其他位置，目标目录的同步、备份和共享设置仍然有效。
 
-DayTrace 在本机运行，不包含网络代码。它读取前台窗口的 Accessibility 文本，写到 `~/Library/Application Support/DayTrace/` 和用户配置的输出目录：
+摘要对能识别的密码和密钥做遮蔽。标题、正文、原文分段和压缩活动数据仍可能含有敏感内容。Markdown 中的采集字段按文本呈现，摘录和原文置于代码块。日志旁的 `.damaged-*` 恢复文件也可能包含敏感内容。
 
-- 活动采样：`journal/events/YYYY-MM-DD.jsonl`
-- 专注记录：`sessions/sessions.jsonl`
-- 设置与状态：`settings.json`、`status.json`、`export-state.json`
-- 归档：`YYYY-MM-DD_23-00.md`、`.ui/`、`.raw/*.jsonl.gz`
-
-这些文件只受当前用户的文件权限保护。删除 `~/Library/Application Support/DayTrace` 和输出目录即可清除本机数据。
-
-它不截屏、不挂钩键盘、不读取剪贴板、不联网；跳过密码框、密码管理器和系统私密界面；URL 去掉 query 和 fragment。归档摘要会把疑似密钥/密码替换为 `〔已遮蔽〕`，但原始文本仍在本机 `.raw` 里，分享归档前请自行检查。
-
-捕获到的界面文字按数据处理，不当作指令——即使窗口里写着「执行某条命令」，DayTrace 也不会执行它。
+要清除数据，退出 DayTrace 后删除其应用数据目录，并从自选输出目录中删除 DayTrace 归档。

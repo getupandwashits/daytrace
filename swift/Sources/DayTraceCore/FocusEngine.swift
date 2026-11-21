@@ -68,10 +68,6 @@ public final class FocusEngine: ObservableObject {
     private let clock: () -> Date
     private let idleProvider: () -> TimeInterval
     public var statusURL: URL?
-    /// Optional bridge for the external readers that expect AutoPomodoro's
-    /// `autopomodoro` status schema.
-    public var legacyStatusWriter: LegacyStatusWriter?
-
     public init(
         clock: @escaping () -> Date = Date.init,
         idleProvider: @escaping () -> TimeInterval = { Presence.idleSeconds() },
@@ -388,11 +384,6 @@ public final class FocusEngine: ObservableObject {
         }
     }
 
-    private var legacyPhase: String {
-        guard state == .away else { return "focus" }
-        return mode == .traditional && breakKind == .long ? "longBreak" : "shortBreak"
-    }
-
     private var awayElapsed: TimeInterval {
         guard let awayStartedAt else { return restTargetDuration }
         return max(0, clock().timeIntervalSince(awayStartedAt))
@@ -436,25 +427,6 @@ public final class FocusEngine: ObservableObject {
             pomodorosPerCycle: max(1, settings.rounds)
         )
         if let statusURL { try? snapshot.write(to: statusURL) }
-        if let legacyStatusWriter {
-            legacyStatusWriter.write(LegacyLiveStatus(
-                processID: snapshot.processID,
-                updatedAt: snapshot.updatedAt,
-                state: snapshot.state,
-                stateLabel: snapshot.stateLabel,
-                focusElapsedSeconds: snapshot.focusElapsedSeconds,
-                focusTargetSeconds: snapshot.focusTargetSeconds,
-                focusRemainingSeconds: snapshot.focusRemainingSeconds,
-                restRemainingSeconds: snapshot.restRemainingSeconds,
-                restTargetSeconds: snapshot.restTargetSeconds,
-                remainingFraction: snapshot.remainingFraction,
-                trackingSuspended: snapshot.trackingSuspended,
-                mode: snapshot.mode,
-                phase: legacyPhase,
-                completedPomodoros: snapshot.completedPomodoros,
-                pomodorosPerCycle: snapshot.pomodorosPerCycle
-            ))
-        }
         onStatusChange?()
     }
 }

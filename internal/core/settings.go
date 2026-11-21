@@ -34,17 +34,11 @@ func DefaultSettings() Settings {
 		SampleIntervalSec: 10,
 		IdleThresholdSec:  180,
 		UIMaxChars:        16000,
-		ExcludedApps: []string{
-			"com.1password.1password",
-			"com.agilebits.onepassword7",
-			"org.keepassxc.keepassxc",
-			"com.apple.Passwords",
-		},
-		CollectActivity: true,
-		ExportHour:      23,
-		ExportMinute:    0,
-		AutoExport:      true,
-		OutputDirectory: DefaultOutput(),
+		CollectActivity:   false,
+		ExportHour:        23,
+		ExportMinute:      0,
+		AutoExport:        true,
+		OutputDirectory:   DefaultOutput(),
 	}
 }
 
@@ -87,17 +81,16 @@ func (s *SettingsStore) reload() {
 			s.settings = merged
 		}
 	}
-	// The debug output override must remain authoritative even after a
-	// settings file has been written.
-	if value := os.Getenv("DAYTRACE_OUTPUT"); value != "" {
-		s.settings.OutputDirectory = value
-	}
 }
 
 func (s *SettingsStore) Get() Settings {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.settings
+	value := s.settings
+	if override := os.Getenv("DAYTRACE_OUTPUT"); override != "" {
+		value.OutputDirectory = override
+	}
+	return value
 }
 
 func (s *SettingsStore) Save(value Settings) error {
@@ -106,17 +99,15 @@ func (s *SettingsStore) Save(value Settings) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
+	if os.Getenv("DAYTRACE_OUTPUT") != "" {
+		value.OutputDirectory = s.settings.OutputDirectory
+	}
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	temporary := s.path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(temporary, s.path); err != nil {
-		_ = os.Remove(temporary)
+	if err := writeFileAtomic(s.path, data); err != nil {
 		return err
 	}
 	s.settings = value

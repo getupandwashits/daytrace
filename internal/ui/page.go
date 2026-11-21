@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/getupandwashits/daytrace/internal/core"
@@ -33,6 +35,11 @@ func (a *App) snapshot() view {
 		copy := *a.lastSample
 		last = &copy
 	}
+	var messages []string
+	for operation, message := range a.errors {
+		messages = append(messages, operation+"："+message)
+	}
+	sort.Strings(messages)
 	return view{
 		Status:           a.Focus.Snapshot(),
 		PhaseLabel:       a.Focus.PhaseLabel(),
@@ -42,7 +49,7 @@ func (a *App) snapshot() view {
 		LastSample:       last,
 		LastExport:       a.lastExport,
 		LastExportAt:     a.lastExportAt,
-		LastError:        a.lastError,
+		LastError:        strings.Join(messages, "\n"),
 		Accessibility:    a.accessibility,
 		CollectorRunning: a.collectorRunning,
 		Settings:         a.Settings.Get(),
@@ -54,6 +61,9 @@ func (a *App) Page(c vui.C) {
 	v := a.snapshot()
 	vui.Column(c).Fill().Pad(20).Gap(14).Children(func() {
 		a.header(c, v)
+		if v.LastError != "" {
+			vui.Text(c, v.LastError).FontSize(12).Color(c.Theme().Danger)
+		}
 		vui.Tabs(c, &a.tab, []string{"概览", "历史", "设置"}, nil)
 		switch a.tab {
 		case "历史":
@@ -73,7 +83,7 @@ func (a *App) header(c vui.C, v view) {
 			vui.Text(c, "DayTrace").FontSize(24).Bold()
 			vui.Text(c, a.headerDate()).FontSize(12).Muted()
 		})
-		if !v.Accessibility {
+		if v.Settings.CollectActivity && !v.Accessibility {
 			vui.Text(c, "缺少辅助功能权限").FontSize(12).Color(theme.Danger)
 		}
 		vui.Row(c).Gap(8).Children(func() {
@@ -125,7 +135,7 @@ func (a *App) focusCard(c vui.C, v view) {
 			vui.Column(c).Grow(1).Gap(2).Children(func() {
 				vui.Text(c, v.PhaseLabel).FontSize(15).Bold()
 				if status.TrackingSuspended {
-					vui.Text(c, "采集已暂停").FontSize(12).Color(theme.Danger)
+					vui.Text(c, "专注计时已挂起").FontSize(12).Color(theme.Danger)
 				}
 			})
 			vui.Row(c).Gap(8).Children(func() { a.focusButtons(c, status) })
@@ -357,20 +367,6 @@ func dailyTotals(sessions []core.FocusSession) []dayTotal {
 func (a *App) settingsPage(c vui.C, v view) {
 	theme := c.Theme()
 	vui.Scroll(c).Grow(1).Gap(14).Children(func() {
-		if v.LastError != "" {
-			vui.Column(c).FillWidth().Pad(12).Radius(10).Background(theme.Card).Border(1, theme.Danger).Children(func() {
-				vui.Text(c, v.LastError).FontSize(12).Color(theme.Danger)
-			})
-		}
-		if !v.Accessibility {
-			vui.Column(c).FillWidth().Pad(14).Radius(12).Background(theme.Card).Border(1, theme.Danger).Gap(8).Children(func() {
-				vui.Text(c, "需要辅助功能权限").FontSize(14).Bold()
-				vui.Text(c, "DayTrace 只有读取当前窗口文字才能生成活动记录；不会截屏、记录按键或联网。").FontSize(12).Muted()
-				if vui.Button(c, "请求权限").Clicked() {
-					a.Collector.RequestAccessibility()
-				}
-			})
-		}
 
 		settingsCard(c, "专注", func() {
 			fieldRow(c, "专注目标（分钟）", "25", &a.form.automaticFocus)
@@ -382,6 +378,10 @@ func (a *App) settingsPage(c vui.C, v view) {
 
 		settingsCard(c, "活动采集", func() {
 			vui.Switch(c, &a.form.collect, "运行时采集前台窗口")
+			vui.Text(c, "保存后开始记录前台应用。授予辅助功能权限后，还会保存窗口标题和能读到的正文。日志和归档可能包含私密内容。").FontSize(12).Muted()
+			if a.form.collect && !v.Accessibility && vui.Button(c, "请求辅助功能权限").Clicked() {
+				a.Collector.RequestAccessibility()
+			}
 			fieldRow(c, "采样间隔（秒）", "10", &a.form.sampleInterval)
 			fieldRow(c, "闲置阈值（秒）", "180", &a.form.idleThreshold)
 			vui.Column(c).Gap(4).Children(func() {
@@ -394,9 +394,14 @@ func (a *App) settingsPage(c vui.C, v view) {
 		})
 
 		settingsCard(c, "归档", func() {
-			vui.Switch(c, &a.form.autoExport, "每天 23:00 自动归档")
-			fieldRow(c, "输出目录", "~/Documents/DayTrace", &a.form.output)
-			vui.Text(c, "文件名保持 Daily_record 的约定：定时归档为 YYYY-MM-DD_23-00，手动归档带 _manual。").FontSize(12).Muted()
+			label := fmt.Sprintf("每天北京时间 %02d:%02d 自动归档", v.Settings.ExportHour, v.Settings.ExportMinute)
+			vui.Switch(c, &a.form.autoExport, label)
+			if os.Getenv("DAYTRACE_OUTPUT") != "" {
+				vui.Text(c, "输出目录由 DAYTRACE_OUTPUT 指定").FontSize(12).Muted()
+				vui.Text(c, v.Settings.OutputDirectory).FontSize(12).Mono()
+			} else {
+				fieldRow(c, "输出目录", core.DefaultOutput(), &a.form.output)
+			}
 		})
 
 		vui.Row(c).Gap(8).Justify(vui.End).Children(func() {

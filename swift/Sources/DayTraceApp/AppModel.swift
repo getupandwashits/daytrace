@@ -43,7 +43,6 @@ final class AppModel: ObservableObject {
         exporter = Exporter(journal: journal, settingsStore: store)
         collector = ActivityCollector(configuration: Self.configuration(store.settings))
         engine = FocusEngine()
-        engine.legacyStatusWriter = LegacyStatusWriter()
         engine.configure(store.settings)
 
         engine.onSession = { [weak self] session in

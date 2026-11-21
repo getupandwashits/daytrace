@@ -16,7 +16,9 @@ DayTrace 是一个独立的 macOS 菜单栏应用，把自动专注计时和可�
 
 ## 安装
 
-当前版本从源码构建。需要 macOS 12 或更新、Go 1.26 或更新，以及 Xcode Command Line Tools。构建脚本使用 Go 1.26.11，以生成面向 macOS 12 的产物。首次构建可由 Go 自动下载这个工具链。
+Apple Silicon 的测试 DMG 见 [GitHub Releases](https://github.com/getupandwashits/daytrace/releases)。打开 DMG 后，把 DayTrace 拖到 Applications。测试包使用 ad-hoc 签名，尚未经过 Apple 公证。
+
+从源码构建需要 macOS 12 或更新、Go 1.26 或更新，以及 Xcode Command Line Tools。构建脚本使用 Go 1.26.11，以生成面向 macOS 12 的产物。首次构建可由 Go 自动下载这个工具链。
 
 ```bash
 git clone https://github.com/getupandwashits/daytrace.git
@@ -105,6 +107,8 @@ DAYTRACE_SHOW_DASHBOARD=1 \
 
 Go 版由 `cmd/daytrace`、`internal/core`、`internal/macos` 和 `internal/ui` 组成，使用 [Viva](https://github.com/vivaui/viva) 和 macOS 系统框架。[`swift/`](swift/README.md) 保存历史原型。
 
-专注计时的行为参考了 [AutoPomodoro](https://github.com/MaTwickenham/AutoPomodoro)，活动记录来自作者此前的 MyMonitor 实践。归档的分层设计也参考了 [Beayy v0.2.19](https://github.com/hengfengliya/beayy/tree/v0.2.19)。
+专注计时的行为参考了 [AutoPomodoro](https://github.com/MaTwickenham/AutoPomodoro)。归档的分层设计也参考了 [Beayy v0.2.19](https://github.com/hengfengliya/beayy/tree/v0.2.19)。
+
+应用图标使用 OpenAI ImageGen 为 DayTrace 生成。
 
 DayTrace 使用 [MIT 许可证](LICENSE)。第三方组件和构建产物附带的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)，隐私与安全问题按 [SECURITY.md](SECURITY.md) 报告。

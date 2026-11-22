@@ -12,6 +12,8 @@ type settingsForm struct {
 	pauseTolerance string
 	resetThreshold string
 	rest           string
+	longRest       string
+	rounds         string
 	minimumRecord  string
 	sampleInterval string
 	idleThreshold  string
@@ -27,6 +29,8 @@ func formFromSettings(settings core.Settings) settingsForm {
 		pauseTolerance: formatFloat(settings.PauseToleranceMin),
 		resetThreshold: formatFloat(settings.ResetThresholdMin),
 		rest:           formatFloat(settings.RestMin),
+		longRest:       formatFloat(settings.LongRestMin),
+		rounds:         strconv.Itoa(settings.RoundsPerCycle),
 		minimumRecord:  formatFloat(settings.MinimumRecordMin),
 		sampleInterval: formatFloat(settings.SampleIntervalSec),
 		idleThreshold:  formatFloat(settings.IdleThresholdSec),

@@ -9,7 +9,7 @@ DayTrace 是一个独立的 macOS 菜单栏应用，把自动专注计时和可�
 
 *DayTrace is a standalone macOS menu bar app for automatic focus timing and optional foreground activity recording. It writes local Markdown archives and does not capture screenshots, record keystrokes or send data over the network.*
 
-- **自动专注**：根据系统闲置时间切换专注、短暂停顿和休息。休息后持续使用键鼠会开始新一轮，到达目标时间会弹出休息卡片。锁屏和睡眠期间挂起计时。
+- **自动专注**：根据系统闲置时间切换专注、短暂停顿和休息。休息后持续使用键鼠会开始新一轮，到达目标时间会弹出休息卡片；每完成 4 轮到达目标的专注，下一次休息自动变成 15 分钟长休息（轮数和时长可在设置里改）。锁屏和睡眠期间挂起计时。
 - **活动采集**：开启后每 10 秒采样，检测到切换前台应用时补采。授予辅助功能权限后可读取窗口标题和应用提供的 Accessibility 文本。可在设置里排除应用。
 - **归档**：默认北京时间 23:00 归档尚未提交的采样和已结束的专注时段。支持随时手动归档。
 - **菜单栏常驻**：在菜单栏打开仪表盘查看概览、专注历史和设置。退出应用即停止采集。

@@ -261,6 +261,8 @@ func (a *App) SaveSettings() {
 	next.PauseToleranceMin = clampFloat(parseFloat(a.form.pauseTolerance, current.PauseToleranceMin), 0.5, 60)
 	next.ResetThresholdMin = clampFloat(parseFloat(a.form.resetThreshold, current.ResetThresholdMin), 1, 180)
 	next.RestMin = clampFloat(parseFloat(a.form.rest, current.RestMin), 1, 60)
+	next.LongRestMin = clampFloat(parseFloat(a.form.longRest, current.LongRestMin), 1, 120)
+	next.RoundsPerCycle = clampInt(parseInt(a.form.rounds, current.RoundsPerCycle), 1, 12)
 	next.MinimumRecordMin = clampFloat(parseFloat(a.form.minimumRecord, current.MinimumRecordMin), 0.5, 120)
 	next.SampleIntervalSec = clampFloat(parseFloat(a.form.sampleInterval, current.SampleIntervalSec), 2, 600)
 	next.IdleThresholdSec = clampFloat(parseFloat(a.form.idleThreshold, current.IdleThresholdSec), 10, 3600)
@@ -316,11 +318,15 @@ func (a *App) setExport(message string) {
 // rest resets the focus timer; 「稍后」 starts a new focus round instead of
 // leaving the timer pinned at zero.
 func (a *App) askRest(message string) {
-	rest := a.Settings.Get().RestMin
-	detail := fmt.Sprintf("%s 休息 %g 分钟，连按两下空格或点「开始休息」。", message, rest)
-	if a.Focus.Snapshot().State != string(core.StateReminding) {
+	status := a.Focus.Snapshot()
+	if status.State != string(core.StateReminding) {
 		return
 	}
+	kind := "休息"
+	if status.RestKind == "long" {
+		kind = "长休息"
+	}
+	detail := fmt.Sprintf("%s %s %g 分钟，连按两下空格或点「开始休息」。", message, kind, status.RestTargetSeconds/60)
 	macos.ShowRestPrompt("该休息一下了", detail, func(rest bool) {
 		if a.Focus.Snapshot().State != string(core.StateReminding) {
 			return

@@ -286,6 +286,82 @@ func TestBeginRestStartsAFullCountdownAndRecordsTheFocus(t *testing.T) {
 	}
 }
 
+func TestEveryFourthRoundUsesALongRest(t *testing.T) {
+	settings := DefaultSettings()
+	settings.AutomaticFocusMin = 1
+	settings.MinimumRecordMin = 0.5
+	clock := &testClock{now: time.Unix(1_700_000_000, 0)}
+	engine := NewFocusEngine(settings, clock.Now, func() float64 { return 0 })
+	zero := 0.0
+
+	completeRound := func(round int) StatusSnapshot {
+		engine.Tick(&zero)
+		engine.Tick(&zero)
+		advance(engine, clock, 60)
+		status := engine.Snapshot()
+		if status.State != string(StateReminding) {
+			t.Fatalf("round %d state = %s", round, status.State)
+		}
+		return status
+	}
+
+	for round := 1; round <= 3; round++ {
+		status := completeRound(round)
+		if status.RestKind != "short" || math.Abs(status.RestTargetSeconds-300) > 0.01 {
+			t.Fatalf("round %d rest = %s %.0fs", round, status.RestKind, status.RestTargetSeconds)
+		}
+		engine.BeginRest()
+		advance(engine, clock, 301)
+	}
+
+	status := completeRound(4)
+	if status.RestKind != "long" || math.Abs(status.RestTargetSeconds-900) > 0.01 {
+		t.Fatalf("fourth rest = %s %.0fs", status.RestKind, status.RestTargetSeconds)
+	}
+	engine.BeginRest()
+	status = engine.Snapshot()
+	if status.State != string(StateAway) || status.RestKind != "long" || math.Abs(status.RestRemainingSeconds-900) > 0.01 {
+		t.Fatalf("long rest = %s %s %.0fs", status.State, status.RestKind, status.RestRemainingSeconds)
+	}
+	advance(engine, clock, 901)
+
+	// The cycle starts over: the next completed round gets a short rest.
+	status = completeRound(5)
+	if status.RestKind != "short" || math.Abs(status.RestTargetSeconds-300) > 0.01 {
+		t.Fatalf("rest after long rest = %s %.0fs", status.RestKind, status.RestTargetSeconds)
+	}
+}
+
+func TestSkippingALongRestStartsANewCycle(t *testing.T) {
+	settings := DefaultSettings()
+	settings.AutomaticFocusMin = 1
+	settings.MinimumRecordMin = 0.5
+	clock := &testClock{now: time.Unix(1_700_000_000, 0)}
+	engine := NewFocusEngine(settings, clock.Now, func() float64 { return 0 })
+	zero := 0.0
+
+	completeRound := func() StatusSnapshot {
+		engine.Tick(&zero)
+		engine.Tick(&zero)
+		advance(engine, clock, 60)
+		return engine.Snapshot()
+	}
+	for round := 1; round <= 3; round++ {
+		completeRound()
+		engine.BeginRest()
+		advance(engine, clock, 301)
+	}
+	if status := completeRound(); status.RestKind != "long" {
+		t.Fatalf("fourth rest = %s", status.RestKind)
+	}
+	// 「继续专注」 skips the long rest; the next completed round is short.
+	engine.RestartManually()
+	status := completeRound()
+	if status.RestKind != "short" || math.Abs(status.RestTargetSeconds-300) > 0.01 {
+		t.Fatalf("rest after skipping = %s %.0fs", status.RestKind, status.RestTargetSeconds)
+	}
+}
+
 func TestFocusWaitsForFreshInputAfterAllSuspendReasonsClear(t *testing.T) {
 	engine, clock, _ := makeEngine()
 	engine.Suspend("lock")

@@ -373,6 +373,8 @@ func (a *App) settingsPage(c vui.C, v view) {
 			fieldRow(c, "停顿阈值（分钟）", "3", &a.form.pauseTolerance)
 			fieldRow(c, "离开重置（分钟）", "10", &a.form.resetThreshold)
 			fieldRow(c, "休息（分钟）", "5", &a.form.rest)
+			fieldRow(c, "长休息（分钟）", "15", &a.form.longRest)
+			fieldRow(c, "长休息间隔（轮）", "4", &a.form.rounds)
 			fieldRow(c, "最短记录（分钟）", "5", &a.form.minimumRecord)
 		})
 
@@ -465,7 +467,11 @@ func bigClock(status core.StatusSnapshot) string {
 func focusDetail(status core.StatusSnapshot) string {
 	switch core.FocusState(status.State) {
 	case core.StateAway:
-		return fmt.Sprintf("休息目标 %s", core.FormatDuration(status.RestTargetSeconds))
+		label := "休息目标"
+		if status.RestKind == "long" {
+			label = "长休息目标"
+		}
+		return fmt.Sprintf("%s %s", label, core.FormatDuration(status.RestTargetSeconds))
 	case core.StateStopped:
 		return "停止后不计入专注记录"
 	default:

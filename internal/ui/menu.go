@@ -118,7 +118,11 @@ func statusLine(status core.StatusSnapshot) string {
 		return "需要休息"
 	case core.StateAway:
 		if status.RestRemainingSeconds > 0 {
-			return "已休息 · 休息还剩 " + clockText(status.RestRemainingSeconds)
+			label := "休息"
+			if status.RestKind == "long" {
+				label = "长休息"
+			}
+			return "已休息 · " + label + "还剩 " + clockText(status.RestRemainingSeconds)
 		}
 		return "已休息"
 	case core.StateStopped:

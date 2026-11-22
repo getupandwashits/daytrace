@@ -118,6 +118,7 @@ type StatusSnapshot struct {
 	FocusRemainingSeconds float64   `json:"focusRemainingSeconds"`
 	RestRemainingSeconds  float64   `json:"restRemainingSeconds"`
 	RestTargetSeconds     float64   `json:"restTargetSeconds"`
+	RestKind              string    `json:"restKind,omitempty"`
 	RemainingFraction     float64   `json:"remainingFraction"`
 	TrackingSuspended     bool      `json:"trackingSuspended"`
 }
@@ -138,6 +139,7 @@ func (s StatusSnapshot) MarshalJSON() ([]byte, error) {
 		FocusRemainingSeconds float64 `json:"focusRemainingSeconds"`
 		RestRemainingSeconds  float64 `json:"restRemainingSeconds"`
 		RestTargetSeconds     float64 `json:"restTargetSeconds"`
+		RestKind              string  `json:"restKind,omitempty"`
 		RemainingFraction     float64 `json:"remainingFraction"`
 		TrackingSuspended     bool    `json:"trackingSuspended"`
 	}
@@ -154,6 +156,7 @@ func (s StatusSnapshot) MarshalJSON() ([]byte, error) {
 		FocusRemainingSeconds: s.FocusRemainingSeconds,
 		RestRemainingSeconds:  s.RestRemainingSeconds,
 		RestTargetSeconds:     s.RestTargetSeconds,
+		RestKind:              s.RestKind,
 		RemainingFraction:     s.RemainingFraction,
 		TrackingSuspended:     s.TrackingSuspended,
 	})

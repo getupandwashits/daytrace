@@ -12,6 +12,8 @@ type Settings struct {
 	PauseToleranceMin float64  `json:"pauseToleranceMinutes"`
 	ResetThresholdMin float64  `json:"resetThresholdMinutes"`
 	RestMin           float64  `json:"restMinutes"`
+	LongRestMin       float64  `json:"longRestMinutes"`
+	RoundsPerCycle    int      `json:"roundsPerCycle"`
 	MinimumRecordMin  float64  `json:"minimumRecordMinutes"`
 	SampleIntervalSec float64  `json:"sampleIntervalSeconds"`
 	IdleThresholdSec  float64  `json:"idleThresholdSeconds"`
@@ -30,6 +32,8 @@ func DefaultSettings() Settings {
 		PauseToleranceMin: 3,
 		ResetThresholdMin: 10,
 		RestMin:           5,
+		LongRestMin:       15,
+		RoundsPerCycle:    4,
 		MinimumRecordMin:  5,
 		SampleIntervalSec: 10,
 		IdleThresholdSec:  180,
@@ -54,6 +58,11 @@ func (s Settings) ResetThreshold() float64 {
 // menu bar and published as restRemainingSeconds.
 func (s Settings) RestDuration() float64 {
 	return max(60, s.RestMin*60)
+}
+
+// LongRestDuration is used after every RoundsPerCycle completed focus rounds.
+func (s Settings) LongRestDuration() float64 {
+	return max(60, s.LongRestMin*60)
 }
 
 func (s Settings) MinimumRecordDuration() float64 {

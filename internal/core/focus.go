@@ -76,6 +76,9 @@ type FocusEngine struct {
 	stoppedWasIdle    bool
 	manualRest        bool
 	restTarget        float64
+	restIsLong        bool
+	pendingLongRest   bool
+	completedRounds   int
 	inputEvents       []time.Time
 	suspendReasons    map[string]bool
 
@@ -106,7 +109,11 @@ func (e *FocusEngine) Configure(settings Settings) {
 	e.mu.Lock()
 	e.settings = settings
 	if e.state == StateAway && e.awayStartedAt == nil {
-		e.restTarget = settings.RestDuration()
+		if e.restIsLong {
+			e.restTarget = settings.LongRestDuration()
+		} else {
+			e.restTarget = settings.RestDuration()
+		}
 	}
 	e.updatedAt = e.clock()
 	e.mu.Unlock()
@@ -144,6 +151,7 @@ func (e *FocusEngine) Tick(idle *float64) {
 			if e.focusDuration >= e.targetFocusTimeLocked() {
 				e.focusDuration = e.targetFocusTimeLocked()
 				e.state = StateReminding
+				e.completeRoundLocked()
 				reminder = e.reminderTextLocked()
 			}
 		}
@@ -206,6 +214,32 @@ func (e *FocusEngine) sustainedInputLocked() bool {
 	return len(e.inputEvents) >= inputEventsNeeded
 }
 
+// completeRoundLocked counts a focus round that reached its target. After
+// RoundsPerCycle rounds the next rest becomes a long rest; the counter is
+// per-process and resets after each long rest.
+func (e *FocusEngine) completeRoundLocked() {
+	cycle := max(1, e.settings.RoundsPerCycle)
+	e.completedRounds++
+	if e.completedRounds >= cycle {
+		e.completedRounds = 0
+		e.pendingLongRest = true
+	} else {
+		e.pendingLongRest = false
+	}
+}
+
+// setRestTargetLocked fixes the length of the rest that is starting now. A
+// pending long rest is consumed here, so skipping it starts a new cycle.
+func (e *FocusEngine) setRestTargetLocked() {
+	e.restIsLong = e.pendingLongRest
+	e.pendingLongRest = false
+	if e.restIsLong {
+		e.restTarget = e.settings.LongRestDuration()
+	} else {
+		e.restTarget = e.settings.RestDuration()
+	}
+}
+
 func (e *FocusEngine) emit(session *FocusSession, reminder string) {
 	if session != nil && e.OnSession != nil {
 		e.OnSession(*session)
@@ -228,7 +262,7 @@ func (e *FocusEngine) BeginRest() {
 	session := e.persistIfNeeded(TriggerManual, e.lastFocusAtLocked())
 	e.state = StateAway
 	e.inputEvents = nil
-	e.restTarget = e.settings.RestDuration()
+	e.setRestTargetLocked()
 	start := now
 	e.awayStartedAt = &start
 	e.manualRest = true
@@ -251,7 +285,7 @@ func (e *FocusEngine) ResetToAway(trigger FocusTrigger) {
 }
 
 func (e *FocusEngine) resetToAwayLocked(trigger FocusTrigger, now time.Time) *FocusSession {
-	e.restTarget = e.settings.RestDuration()
+	e.setRestTargetLocked()
 
 	session := e.persistIfNeeded(trigger, e.lastFocusAtLocked())
 	e.state = StateAway
@@ -354,6 +388,11 @@ func (e *FocusEngine) Suspend(reason string) {
 	e.inputEvents = nil
 	now := e.clock()
 	session := e.persistIfNeeded(TriggerManual, e.lastFocusAtLocked())
+	if e.state == StateReminding {
+		// A completed round is waiting for its rest; keep the long-rest plan
+		// even though the machine is going to sleep.
+		e.setRestTargetLocked()
+	}
 	e.state = StateAway
 	e.manualRest = false
 	e.awayStartedAt = &now
@@ -390,6 +429,7 @@ func (e *FocusEngine) beginFocusLocked(now time.Time) {
 	e.resumableStart = nil
 	e.stoppedWasIdle = false
 	e.manualRest = false
+	e.pendingLongRest = false
 	e.state = StateActive
 	e.focusDuration = 0
 	e.focusStart = &now
@@ -443,6 +483,21 @@ func (e *FocusEngine) Snapshot() StatusSnapshot {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := e.clock()
+	restTarget := e.restTarget
+	restKind := "short"
+	if e.restIsLong {
+		restKind = "long"
+	}
+	if e.state == StateReminding {
+		// The prompt has not been answered yet, but status readers can already
+		// show whether the rest about to start is the long one.
+		restTarget = e.settings.RestDuration()
+		restKind = "short"
+		if e.pendingLongRest {
+			restTarget = e.settings.LongRestDuration()
+			restKind = "long"
+		}
+	}
 	return StatusSnapshot{
 		SchemaVersion:         1,
 		Source:                "daytrace",
@@ -455,7 +510,8 @@ func (e *FocusEngine) Snapshot() StatusSnapshot {
 		FocusTargetSeconds:    e.targetFocusTimeLocked(),
 		FocusRemainingSeconds: e.remainingDurationLocked(),
 		RestRemainingSeconds:  e.restRemainingLocked(now),
-		RestTargetSeconds:     e.restTarget,
+		RestTargetSeconds:     restTarget,
+		RestKind:              restKind,
 		RemainingFraction:     e.remainingFractionLocked(now),
 		TrackingSuspended:     e.suspended,
 	}
@@ -525,6 +581,9 @@ func (e *FocusEngine) MenuBarTitle() string {
 		return "该休息"
 	case StateAway:
 		if remaining := e.restRemainingLocked(e.clock()); remaining > 0 {
+			if e.restIsLong {
+				return "长休息 " + formatSeconds(remaining)
+			}
 			return "休息 " + formatSeconds(remaining)
 		}
 		return "休息"

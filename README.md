@@ -11,7 +11,7 @@ DayTrace 是一个独立的 macOS 菜单栏应用，把自动专注计时和可�
 
 [安装](#安装) · [首次使用](#首次使用) · [用 Agent 复盘一天](#用-agent-复盘一天) · [参与开发](CONTRIBUTING.md)
 
-- 自动专注根据键鼠闲置时间切换专注、停顿和休息，达到专注目标时提示休息。锁屏和睡眠期间挂起计时。
+- 自动专注根据键鼠闲置时间切换专注、停顿和休息，达到专注目标时提示休息。默认每完成 4 轮达标专注后，下一次休息为 15 分钟。锁屏和睡眠期间挂起计时。
 - 活动采集开启后默认每 10 秒采样，切换前台应用时补采。窗口标题和正文需要辅助功能权限，可在设置里排除应用。
 - 归档默认在北京时间 23:00 写出待归档的活动和已结束的专注时段。菜单栏也可以立即归档。
 
@@ -19,7 +19,7 @@ DayTrace 是一个独立的 macOS 菜单栏应用，把自动专注计时和可�
 
 ### 从 DMG 安装
 
-目前发布的 v0.1.0 测试包适用于 Apple Silicon 和 macOS 12 或更新。打开 DMG，将 DayTrace 拖到 Applications。测试包使用 ad-hoc 签名，尚未经过 Apple 公证。[下载测试 DMG](https://github.com/getupandwashits/daytrace/releases/tag/v0.1.0)
+v0.1.1 测试包适用于 Apple Silicon 和 macOS 12 或更新。打开 DMG，将 DayTrace 拖到 Applications。测试包使用 ad-hoc 签名，尚未经过 Apple 公证。[下载测试 DMG](https://github.com/getupandwashits/daytrace/releases/tag/v0.1.1)
 
 ### 从源码构建
 
@@ -33,8 +33,6 @@ open /Applications/DayTrace.app
 ```
 
 安装前请退出正在运行的 DayTrace。只运行 `./scripts/build.sh` 会在 `build/DayTrace.app` 生成当前 Mac 架构的应用。重新构建并安装后，macOS 可能要求重新授予辅助功能权限。
-
-当前源码新增了长休息。默认完成 4 轮达标的专注后，下一次休息为 15 分钟，轮数和时长可在设置里调整。[更新日志](CHANGELOG.md)
 
 ## 首次使用
 

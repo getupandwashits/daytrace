@@ -432,13 +432,6 @@ func fieldRow(c vui.C, label, placeholder string, value *string) {
 	})
 }
 
-func choiceRow(c vui.C, label string, body func()) {
-	vui.Row(c).Items(vui.Center).Gap(12).Children(func() {
-		vui.Text(c, label).FontSize(13).Width(150)
-		body()
-	})
-}
-
 func statCard(c vui.C, label, value, detail string) {
 	theme := c.Theme()
 	vui.Column(c).Grow(1).Pad(14).Radius(10).Background(theme.Card).Border(1, theme.Border).Gap(3).Children(func() {

@@ -9,16 +9,21 @@ DayTrace 是一个独立的 macOS 菜单栏应用，把自动专注计时和可�
 
 *DayTrace is a standalone macOS menu bar app for automatic focus timing and optional foreground activity recording. It writes local Markdown archives and does not capture screenshots, record keystrokes or send data over the network.*
 
-- **自动专注**：根据系统闲置时间切换专注、短暂停顿和休息。休息后持续使用键鼠会开始新一轮，到达目标时间会弹出休息卡片；每完成 4 轮到达目标的专注，下一次休息自动变成 15 分钟长休息（轮数和时长可在设置里改）。锁屏和睡眠期间挂起计时。
-- **活动采集**：开启后每 10 秒采样，检测到切换前台应用时补采。授予辅助功能权限后可读取窗口标题和应用提供的 Accessibility 文本。可在设置里排除应用。
-- **归档**：默认北京时间 23:00 归档尚未提交的采样和已结束的专注时段。支持随时手动归档。
-- **菜单栏常驻**：在菜单栏打开仪表盘查看概览、专注历史和设置。退出应用即停止采集。
+[安装](#安装) · [首次使用](#首次使用) · [用 Agent 复盘一天](#用-agent-复盘一天) · [参与开发](CONTRIBUTING.md)
+
+- 自动专注根据键鼠闲置时间切换专注、停顿和休息，达到专注目标时提示休息。锁屏和睡眠期间挂起计时。
+- 活动采集开启后默认每 10 秒采样，切换前台应用时补采。窗口标题和正文需要辅助功能权限，可在设置里排除应用。
+- 归档默认在北京时间 23:00 写出待归档的活动和已结束的专注时段。菜单栏也可以立即归档。
 
 ## 安装
 
-Apple Silicon 的测试 DMG 见 [GitHub Releases](https://github.com/getupandwashits/daytrace/releases)。打开 DMG 后，把 DayTrace 拖到 Applications。测试包使用 ad-hoc 签名，尚未经过 Apple 公证。
+### 从 DMG 安装
 
-从源码构建需要 macOS 12 或更新、Go 1.26 或更新，以及 Xcode Command Line Tools。构建脚本使用 Go 1.26.11，以生成面向 macOS 12 的产物。首次构建可由 Go 自动下载这个工具链。
+目前发布的 v0.1.0 测试包适用于 Apple Silicon 和 macOS 12 或更新。打开 DMG，将 DayTrace 拖到 Applications。测试包使用 ad-hoc 签名，尚未经过 Apple 公证。[下载测试 DMG](https://github.com/getupandwashits/daytrace/releases/tag/v0.1.0)
+
+### 从源码构建
+
+需要 macOS 12 或更新、Go 1.26 或更新，以及 Xcode Command Line Tools。构建脚本使用支持 macOS 12 的 Go 1.26.11，首次可由 Go 自动下载。
 
 ```bash
 git clone https://github.com/getupandwashits/daytrace.git
@@ -27,7 +32,9 @@ cd daytrace
 open /Applications/DayTrace.app
 ```
 
-也可以只运行 `./scripts/build.sh`，产物位于 `build/DayTrace.app`，架构与构建机器一致。安装前请退出正在运行的 DayTrace。构建产物使用 ad-hoc 签名，适合本机使用。重新构建后，可能需要在系统设置里移除旧的辅助功能条目并重新授权。
+安装前请退出正在运行的 DayTrace。只运行 `./scripts/build.sh` 会在 `build/DayTrace.app` 生成当前 Mac 架构的应用。重新构建并安装后，macOS 可能要求重新授予辅助功能权限。
+
+当前源码新增了长休息。默认完成 4 轮达标的专注后，下一次休息为 15 分钟，轮数和时长可在设置里调整。[更新日志](CHANGELOG.md)
 
 ## 首次使用
 
@@ -57,9 +64,7 @@ open /Applications/DayTrace.app
 - `ui/part-NNN.md` 保存去重的原文。
 - `activity.jsonl.gz` 和 `meta.json` 保存活动采样和归档元数据。
 
-跨天启动时，下一次定时归档会补交截止时间前仍在本地的未归档记录。已全部成功归档且超过 7 天的活动日志可以被清理。使用 `export --force` 会另存一份当天仍可读取的活动和专注快照，不改变自动补档的进度。
-
-日志末尾若因写入中断而不完整，DayTrace 会恢复完整记录，并把损坏片段保存为日志旁的 `.damaged-*` 文件供排查。输出目录不可用时，可以在设置里换一个目录再归档。新目录从上一次确认交付的位置继续，旧目录里可能留有一次未登记完成的归档。
+应用运行时会检查定时归档。错过截止时间后，下一次检查会收入截至该时间仍在本地的待归档记录。已全部归档且超过 7 天的活动日志会清理。
 
 ## 用 Agent 复盘一天
 
@@ -108,11 +113,12 @@ open "$demo_dir/archives"
 
 ## 开发与 CLI
 
+源码布局和贡献流程见 [贡献指南](CONTRIBUTING.md)。
+
 ```bash
 go test ./...
 go vet ./...
 go tool viva vet
-go tool viva dev .
 ./scripts/build.sh
 ```
 
@@ -143,7 +149,7 @@ DAYTRACE_SHOW_DASHBOARD=1 \
 
 ## 源码和许可
 
-DayTrace 使用 Go、Viva 和 macOS 系统框架。应用入口在 `cmd/daytrace`，采集、归档和界面实现在 `internal/`。[Viva](https://github.com/vivaui/viva)
+DayTrace 使用 Go、Viva 和 macOS 系统框架。[Viva](https://github.com/vivaui/viva)
 
 专注计时的行为参考了 [AutoPomodoro](https://github.com/MaTwickenham/AutoPomodoro)。归档的分层设计也参考了 [Beayy v0.2.19](https://github.com/hengfengliya/beayy/tree/v0.2.19)。
 

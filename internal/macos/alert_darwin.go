@@ -21,9 +21,9 @@ var restPrompt struct {
 	answer func(bool)
 }
 
-// ShowRestPrompt shows the floating "time to rest" card. It does not block:
-// the answer (true for rest, false for later) arrives on the main thread when
-// the user presses Space, Return, Escape or clicks a button.
+// ShowRestPrompt shows the floating "time to rest" card. It does not block
+// and never takes keyboard focus: the answer (true for rest, false for
+// later) arrives on the main thread when the user clicks a button.
 func ShowRestPrompt(title, message string, answer func(bool)) {
 	restPrompt.mu.Lock()
 	restPrompt.answer = answer

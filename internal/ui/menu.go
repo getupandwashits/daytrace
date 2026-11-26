@@ -111,7 +111,11 @@ func statusLine(status core.StatusSnapshot) string {
 	remaining := clockText(status.FocusRemainingSeconds)
 	switch core.FocusState(status.State) {
 	case core.StateActive:
-		return "专注中 · 还剩 " + remaining
+		line := "专注中 · 还剩 " + remaining
+		if status.SkippedRests > 0 {
+			line += fmt.Sprintf(" · 欠休 %d 次", status.SkippedRests)
+		}
+		return line
 	case core.StatePaused:
 		return "短暂停顿 · 还剩 " + remaining
 	case core.StateReminding:

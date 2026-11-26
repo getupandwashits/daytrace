@@ -162,6 +162,7 @@ func (a *App) loop() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	tick := 0
+	reminding := false
 	for {
 		select {
 		case <-a.stop:
@@ -170,6 +171,14 @@ func (a *App) loop() {
 			tick++
 			idle := macos.IdleSeconds()
 			a.Focus.Tick(&idle)
+			state := a.Focus.Snapshot().State
+			if reminding && state != string(core.StateReminding) {
+				// The engine left the reminder on its own (worked through it,
+				// or went away): take the card down without waiting for an
+				// answer.
+				macos.DismissRestPrompt()
+			}
+			reminding = state == string(core.StateReminding)
 			a.persistStatus()
 			a.updateStatusItem()
 			if tick%5 == 0 {
@@ -314,9 +323,9 @@ func (a *App) setExport(message string) {
 	a.mu.Unlock()
 }
 
-// askRest shows the floating rest card and acts on the answer. Starting the
-// rest resets the focus timer; 「稍后」 starts a new focus round instead of
-// leaving the timer pinned at zero.
+// askRest shows the floating rest card. The card never takes keyboard focus:
+// continuing to type auto-continues after the reminder grace and counts as a
+// skipped rest, 「开始休息」 starts the countdown rest, 「稍后」 continues now.
 func (a *App) askRest(message string) {
 	status := a.Focus.Snapshot()
 	if status.State != string(core.StateReminding) {
@@ -326,7 +335,7 @@ func (a *App) askRest(message string) {
 	if status.RestKind == "long" {
 		kind = "长休息"
 	}
-	detail := fmt.Sprintf("%s %s %g 分钟，连按两下空格或点「开始休息」。", message, kind, status.RestTargetSeconds/60)
+	detail := fmt.Sprintf("%s 继续打字会自动跳过这次休息；点「开始休息」进入 %g 分钟%s倒计时。", message, status.RestTargetSeconds/60, kind)
 	macos.ShowRestPrompt("该休息一下了", detail, func(rest bool) {
 		if a.Focus.Snapshot().State != string(core.StateReminding) {
 			return
@@ -334,7 +343,7 @@ func (a *App) askRest(message string) {
 		if rest {
 			a.Focus.BeginRest()
 		} else {
-			a.Focus.RestartManually()
+			a.Focus.SkipRest()
 		}
 		a.afterFocusAction()
 	})

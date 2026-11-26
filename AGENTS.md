@@ -35,7 +35,7 @@ go vet ./...
 - 轮数只在专注达到目标、进入 `reminding` 时加一（`completeRoundLocked`），提前暂停或离开不算。`pendingLongRest` 在休息真正开始时消费（`BeginRest` / `resetToAwayLocked` / 睡眠 `Suspend`）；用户选「继续专注」跳过时，`beginFocusLocked` 会清掉它，下一轮从短休息重新计。
 - 从休息、停顿或停止回到专注需要**连续输入**：10 秒内至少两次「idle < 0.5 秒」的 tick（`inputEvents`），单次误触或触控板/鼠标重连不会开始新一轮专注。暂停仍然是 3 分钟无输入，回到休息是 10 分钟。改判定时别退回「idle < 3 分钟就算回来」，那会让一次假事件启动一整轮 25 分钟。
 - 休息有独立时长（`restMinutes` 默认 5，`longRestMinutes` 默认 15），倒计时从**检测到离开**开始，而不是从最后一次活动倒推——离开重置阈值比休息长，倒推的话永远是 0。菜单栏和 `status.json` 的 `restRemainingSeconds`、`restTargetSeconds`、`restKind`、`remainingFraction` 都靠它。
-- 到目标时长时弹 `macos.ShowRestPrompt`（AppKit 浮动卡片，连按两下空格/回车或点击才继续），确认后 `BeginRest` 记录这一轮专注并开始完整倒计时；选「继续专注」则 `RestartManually` 开新一轮。弹窗在 AppKit 主线程异步呈现，锁屏或睡眠时撤下。
+- 到目标时长进入 `reminding` 并弹 `macos.ShowRestPrompt`（AppKit 浮动卡片）。卡片**不抢键盘焦点**（只有 `orderFrontRegardless`，没有 `makeKeyAndOrderFront`；也别加回双空格快捷键——那会吞掉用户正在打的字）。三条出路：点「开始休息」→ `BeginRest` 记录这一轮专注并开始完整倒计时、欠休清零；点「稍后」→ `SkipRest` 立即开新一轮并计入 `skippedRests`；继续打字超过 `remindingAutoContinue`（60 秒）→ `Tick` 自动跳过休息，UI 循环发现状态离开 `reminding` 后撤下卡片。跳过的休息显示在菜单栏标题（如「18:42 欠休1」），提醒文案会升级（「前面已经跳过 N 次休息」），离开重置阈值这种真实休息也会清零。弹窗在 AppKit 主线程异步呈现，锁屏或睡眠时撤下。
 
 ## 采集
 

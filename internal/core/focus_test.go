@@ -2,6 +2,7 @@ package core
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -359,6 +360,109 @@ func TestSkippingALongRestStartsANewCycle(t *testing.T) {
 	status := completeRound()
 	if status.RestKind != "short" || math.Abs(status.RestTargetSeconds-300) > 0.01 {
 		t.Fatalf("rest after skipping = %s %.0fs", status.RestKind, status.RestTargetSeconds)
+	}
+}
+
+func TestWorkingThroughTheReminderContinuesFocus(t *testing.T) {
+	settings := DefaultSettings()
+	settings.AutomaticFocusMin = 1
+	settings.MinimumRecordMin = 0.5
+	clock := &testClock{now: time.Unix(1_700_000_000, 0)}
+	engine := NewFocusEngine(settings, clock.Now, func() float64 { return 0 })
+	sessions := &[]FocusSession{}
+	engine.OnSession = func(session FocusSession) { *sessions = append(*sessions, session) }
+	zero := 0.0
+
+	engine.Tick(&zero)
+	engine.Tick(&zero)
+	advance(engine, clock, 60)
+	if got := engine.Snapshot().State; got != string(StateReminding) {
+		t.Fatalf("state = %s", got)
+	}
+	// The card is up, but typing keeps flowing: before the grace ends the
+	// reminder is still waiting for an answer.
+	advance(engine, clock, 30)
+	if got := engine.Snapshot().State; got != string(StateReminding) {
+		t.Fatalf("state after 30s of typing = %s", got)
+	}
+	// Past the grace, still typing: focus continues as a new round and the
+	// skipped rest stays on the record.
+	advance(engine, clock, 31)
+	status := engine.Snapshot()
+	if status.State != string(StateActive) {
+		t.Fatalf("state after grace = %s", status.State)
+	}
+	if status.SkippedRests != 1 {
+		t.Fatalf("skipped = %v", status.SkippedRests)
+	}
+	if len(*sessions) != 1 || math.Abs((*sessions)[0].Duration-60) > 0.01 {
+		t.Fatalf("sessions = %+v", *sessions)
+	}
+	engine.Tick(&zero)
+	if status := engine.Snapshot(); status.FocusElapsedSeconds != 2 {
+		t.Fatalf("focus after continue = %v", status.FocusElapsedSeconds)
+	}
+	if title := engine.MenuBarTitle(); !strings.Contains(title, "欠休1") {
+		t.Fatalf("menu title = %q", title)
+	}
+}
+
+func TestReminderTextEscalatesAndRestClearsTheCount(t *testing.T) {
+	settings := DefaultSettings()
+	settings.AutomaticFocusMin = 1
+	settings.MinimumRecordMin = 0.5
+	clock := &testClock{now: time.Unix(1_700_000_000, 0)}
+	engine := NewFocusEngine(settings, clock.Now, func() float64 { return 0 })
+	reminders := &[]string{}
+	engine.OnReminder = func(message string) { *reminders = append(*reminders, message) }
+	zero := 0.0
+
+	engine.Tick(&zero)
+	engine.Tick(&zero)
+	advance(engine, clock, 60)
+	if len(*reminders) != 1 || !strings.Contains((*reminders)[0], "站起来") {
+		t.Fatalf("reminders = %q", *reminders)
+	}
+
+	// 「稍后」 continues now and counts as skipped.
+	engine.SkipRest()
+	engine.Tick(&zero)
+	advance(engine, clock, 60)
+	if len(*reminders) != 2 || !strings.Contains((*reminders)[1], "跳过 1 次") {
+		t.Fatalf("reminders = %q", *reminders)
+	}
+
+	// Actually resting pays the debt off.
+	engine.BeginRest()
+	if status := engine.Snapshot(); status.SkippedRests != 0 {
+		t.Fatalf("skipped after rest = %v", status.SkippedRests)
+	}
+}
+
+func TestALongIdleBreakClearsSkippedRests(t *testing.T) {
+	settings := DefaultSettings()
+	settings.AutomaticFocusMin = 1
+	settings.MinimumRecordMin = 0.5
+	clock := &testClock{now: time.Unix(1_700_000_000, 0)}
+	engine := NewFocusEngine(settings, clock.Now, func() float64 { return 0 })
+	zero := 0.0
+
+	engine.Tick(&zero)
+	engine.Tick(&zero)
+	advance(engine, clock, 60)
+	engine.SkipRest()
+	if status := engine.Snapshot(); status.SkippedRests != 1 {
+		t.Fatalf("skipped = %v", status.SkippedRests)
+	}
+	// Walking away for the reset threshold is a real rest too.
+	idle := 700.0
+	engine.Tick(&idle)
+	status := engine.Snapshot()
+	if status.State != string(StateAway) {
+		t.Fatalf("state = %s", status.State)
+	}
+	if status.SkippedRests != 0 {
+		t.Fatalf("skipped after long idle = %v", status.SkippedRests)
 	}
 }
 

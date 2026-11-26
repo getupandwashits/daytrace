@@ -46,6 +46,11 @@ const (
 	inputEventsNeeded = 2
 )
 
+// remindingAutoContinue is how long the rest card stays up while the user
+// keeps typing. Working through the reminder continues focus as a new round
+// and counts as a skipped rest, so the nudge never blocks the flow.
+const remindingAutoContinue = 60 * time.Second
+
 type FocusTrigger string
 
 const (
@@ -79,6 +84,8 @@ type FocusEngine struct {
 	restIsLong        bool
 	pendingLongRest   bool
 	completedRounds   int
+	remindingSince    *time.Time
+	skippedRests      int
 	inputEvents       []time.Time
 	suspendReasons    map[string]bool
 
@@ -151,6 +158,8 @@ func (e *FocusEngine) Tick(idle *float64) {
 			if e.focusDuration >= e.targetFocusTimeLocked() {
 				e.focusDuration = e.targetFocusTimeLocked()
 				e.state = StateReminding
+				since := now
+				e.remindingSince = &since
 				e.completeRoundLocked()
 				reminder = e.reminderTextLocked()
 			}
@@ -181,6 +190,12 @@ func (e *FocusEngine) Tick(idle *float64) {
 	case StateReminding:
 		if e.idleTime >= e.settings.ResetThreshold() {
 			session = e.resetToAwayLocked(TriggerAuto, now)
+		} else if e.remindingSince != nil &&
+			now.Sub(*e.remindingSince) >= remindingAutoContinue &&
+			e.sustainedInputLocked() {
+			// The user chose to work through the reminder: continue as a new
+			// round and keep the skipped rest on the record.
+			session = e.skipRestLocked(TriggerAuto, now)
 		}
 
 	case StateStopped:
@@ -240,6 +255,26 @@ func (e *FocusEngine) setRestTargetLocked() {
 	}
 }
 
+// skipRestLocked continues working instead of resting: the finished round is
+// recorded, a new round starts, and the skipped rest is remembered so the
+// next reminder can escalate.
+func (e *FocusEngine) skipRestLocked(trigger FocusTrigger, now time.Time) *FocusSession {
+	session := e.persistIfNeeded(trigger, e.lastFocusAtLocked())
+	e.skippedRests++
+	e.beginFocusLocked(now)
+	return session
+}
+
+// SkipRest answers the rest prompt with 「稍后」: focus restarts as a new
+// round right away and the rest is counted as skipped.
+func (e *FocusEngine) SkipRest() {
+	e.mu.Lock()
+	now := e.clock()
+	session := e.skipRestLocked(TriggerManual, now)
+	e.mu.Unlock()
+	e.emit(session, "")
+}
+
 func (e *FocusEngine) emit(session *FocusSession, reminder string) {
 	if session != nil && e.OnSession != nil {
 		e.OnSession(*session)
@@ -263,6 +298,8 @@ func (e *FocusEngine) BeginRest() {
 	e.state = StateAway
 	e.inputEvents = nil
 	e.setRestTargetLocked()
+	e.skippedRests = 0
+	e.remindingSince = nil
 	start := now
 	e.awayStartedAt = &start
 	e.manualRest = true
@@ -286,6 +323,9 @@ func (e *FocusEngine) ResetToAway(trigger FocusTrigger) {
 
 func (e *FocusEngine) resetToAwayLocked(trigger FocusTrigger, now time.Time) *FocusSession {
 	e.setRestTargetLocked()
+	// Ten minutes away is a real rest: it pays off any skipped ones.
+	e.skippedRests = 0
+	e.remindingSince = nil
 
 	session := e.persistIfNeeded(trigger, e.lastFocusAtLocked())
 	e.state = StateAway
@@ -394,6 +434,7 @@ func (e *FocusEngine) Suspend(reason string) {
 		e.setRestTargetLocked()
 	}
 	e.state = StateAway
+	e.remindingSince = nil
 	e.manualRest = false
 	e.awayStartedAt = &now
 	e.focusDuration = 0
@@ -430,6 +471,7 @@ func (e *FocusEngine) beginFocusLocked(now time.Time) {
 	e.stoppedWasIdle = false
 	e.manualRest = false
 	e.pendingLongRest = false
+	e.remindingSince = nil
 	e.state = StateActive
 	e.focusDuration = 0
 	e.focusStart = &now
@@ -457,7 +499,11 @@ func (e *FocusEngine) persistIfNeeded(trigger FocusTrigger, endedAt time.Time) *
 }
 
 func (e *FocusEngine) reminderTextLocked() string {
-	return fmt.Sprintf("已经专注 %d 分钟，站起来走动一下，喝口水再继续。", int(e.focusDuration/60))
+	minutes := int(e.focusDuration / 60)
+	if e.skippedRests > 0 {
+		return fmt.Sprintf("已经专注 %d 分钟，前面已经跳过 %d 次休息。这次真的站起来走动一下，喝口水再继续。", minutes, e.skippedRests)
+	}
+	return fmt.Sprintf("已经专注 %d 分钟，站起来走动一下，喝口水再继续。", minutes)
 }
 
 func (e *FocusEngine) lastFocusAtLocked() time.Time {
@@ -512,6 +558,7 @@ func (e *FocusEngine) Snapshot() StatusSnapshot {
 		RestRemainingSeconds:  e.restRemainingLocked(now),
 		RestTargetSeconds:     restTarget,
 		RestKind:              restKind,
+		SkippedRests:          e.skippedRests,
 		RemainingFraction:     e.remainingFractionLocked(now),
 		TrackingSuspended:     e.suspended,
 	}
@@ -576,7 +623,12 @@ func (e *FocusEngine) MenuBarTitle() string {
 	defer e.mu.Unlock()
 	switch e.state {
 	case StateActive, StatePaused:
-		return formatSeconds(e.remainingDurationLocked())
+		title := formatSeconds(e.remainingDurationLocked())
+		if e.skippedRests > 0 {
+			// Keep an unpaid rest visible so it is not forgotten.
+			title += fmt.Sprintf(" 欠休%d", e.skippedRests)
+		}
+		return title
 	case StateReminding:
 		return "该休息"
 	case StateAway:

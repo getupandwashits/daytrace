@@ -5,52 +5,25 @@
 
 #include "_cgo_export.h"
 
-/* The rest prompt is a floating card, like the Swift prototype's: it comes to
- * the front without the app taking focus, stays above other windows and waits
- * for Space, Return, Escape or a click. */
-
-@interface DTReminderPanel : NSPanel
-@end
+/* The rest prompt is a floating card. It never takes keyboard focus: the user
+ * can keep typing in whatever app is active, and DayTrace dismisses the card
+ * on its own when focus continues or the user leaves. The only way to answer
+ * it is the buttons. */
 
 @interface DTReminderTarget : NSObject
 - (void)rest:(id)sender;
 - (void)later:(id)sender;
 @end
 
-static DTReminderPanel *dtReminderPanel = nil;
+static NSPanel *dtReminderPanel = nil;
 static DTReminderTarget *dtReminderTarget = nil;
-static NSButton *dtReminderRestButton = nil;
-static id dtReminderKeyMonitor = nil;
-static BOOL dtReminderArmed = NO;
-static NSTimeInterval dtReminderArmedAt = 0;
-
-/* One Space while the card is up would start the rest by accident, so the
- * first press only arms it; a second press within two seconds starts. */
-static void dtReminderSpace(void) {
-    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-    if (dtReminderArmed && now - dtReminderArmedAt <= 2.0) {
-        [dtReminderTarget rest:nil];
-        return;
-    }
-    dtReminderArmed = YES;
-    dtReminderArmedAt = now;
-    if (dtReminderRestButton != nil) {
-        dtReminderRestButton.title = @"再按一次空格";
-    }
-}
 
 static void dtReminderClose(void) {
-    if (dtReminderKeyMonitor != nil) {
-        [NSEvent removeMonitor:dtReminderKeyMonitor];
-        dtReminderKeyMonitor = nil;
-    }
     if (dtReminderPanel != nil) {
         [dtReminderPanel orderOut:nil];
         [dtReminderPanel release];
         dtReminderPanel = nil;
     }
-    dtReminderRestButton = nil;
-    dtReminderArmed = NO;
 }
 
 @implementation DTReminderTarget
@@ -63,28 +36,6 @@ static void dtReminderClose(void) {
 - (void)later:(id)sender {
     dtReminderClose();
     daytraceRestAnswer(0);
-}
-
-@end
-
-@implementation DTReminderPanel
-
-- (BOOL)canBecomeKeyWindow {
-    return YES;
-}
-
-- (void)keyDown:(NSEvent *)event {
-    switch (event.keyCode) {
-    case 49:  /* space */
-    case 36:  /* return */
-    case 76:  /* enter */
-        dtReminderSpace();
-        return;
-    case 53:  /* escape */
-        [dtReminderTarget later:nil];
-        return;
-    }
-    [super keyDown:event];
 }
 
 @end
@@ -107,16 +58,16 @@ void dtShowRestPrompt(const char *title, const char *message) {
             dtReminderTarget = [[DTReminderTarget alloc] init];
         }
 
-        DTReminderPanel *panel = [[DTReminderPanel alloc] initWithContentRect:NSMakeRect(0, 0, 440, 250)
-                                                                   styleMask:(NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel)
-                                                                     backing:NSBackingStoreBuffered
-                                                                       defer:NO];
+        NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 440, 250)
+                                                     styleMask:(NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel)
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
         panel.opaque = NO;
         panel.backgroundColor = [NSColor clearColor];
         panel.hasShadow = YES;
         panel.level = NSFloatingWindowLevel;
         panel.hidesOnDeactivate = NO;
-        panel.becomesKeyOnlyIfNeeded = NO;
+        panel.becomesKeyOnlyIfNeeded = YES;
         panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
 
         NSVisualEffectView *card = [[NSVisualEffectView alloc] initWithFrame:panel.contentView.bounds];
@@ -159,8 +110,6 @@ void dtShowRestPrompt(const char *title, const char *message) {
         if (@available(macOS 10.12.2, *)) {
             restButton.bezelColor = [NSColor controlAccentColor];
         }
-        dtReminderRestButton = restButton;
-        dtReminderArmed = NO;
 
         NSStackView *buttons = [NSStackView stackViewWithViews:@[laterButton, restButton]];
         buttons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
@@ -181,24 +130,9 @@ void dtShowRestPrompt(const char *title, const char *message) {
             [messageLabel.widthAnchor constraintLessThanOrEqualToConstant:360],
         ]];
 
-        // Space reaches the panel even when the app does not take focus.
-        dtReminderKeyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
-                                                                    handler:^NSEvent *(NSEvent *event) {
-            switch (event.keyCode) {
-            case 49:
-            case 36:
-            case 76:
-                dtReminderSpace();
-                return nil;
-            case 53:
-                [dtReminderTarget later:nil];
-                return nil;
-            }
-            return event;
-        }];
-
         [panel center];
-        [panel makeKeyAndOrderFront:nil];
+        // No makeKeyAndOrderFront: the card must never steal keystrokes from
+        // the app the user is typing in.
         [panel orderFrontRegardless];
         dtReminderPanel = panel;
     });

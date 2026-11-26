@@ -468,7 +468,11 @@ func focusDetail(status core.StatusSnapshot) string {
 	case core.StateStopped:
 		return "停止后不计入专注记录"
 	default:
-		return fmt.Sprintf("已专注 %s / %s", core.FormatDuration(status.FocusElapsedSeconds), core.FormatDuration(status.FocusTargetSeconds))
+		detail := fmt.Sprintf("已专注 %s / %s", core.FormatDuration(status.FocusElapsedSeconds), core.FormatDuration(status.FocusTargetSeconds))
+		if status.SkippedRests > 0 {
+			detail += fmt.Sprintf(" · 欠休 %d 次", status.SkippedRests)
+		}
+		return detail
 	}
 }
 
@@ -479,7 +483,7 @@ func focusNext(status core.StatusSnapshot) string {
 	case core.StatePaused:
 		return "回来后自动继续"
 	case core.StateReminding:
-		return "休息后自动开始下一轮"
+		return "继续打字会自动跳过这次休息"
 	case core.StateAway:
 		return "开始操作后自动专注"
 	case core.StateStopped:
